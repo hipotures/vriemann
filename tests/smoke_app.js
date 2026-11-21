@@ -639,6 +639,7 @@ load('lib.js'); load('audio.js'); load('app.js');
       for (let c = 0; c < 3; c++) assert.strictEqual(g.attributes.aCenter.array[3 * n + c], S.pos[3 * e.i + c], 'bubble sits on its module');
     }
     assert(!list.some((e) => e.i === i), 'the selected module is the core, not a bubble');
+    { const sd = Array.from(g.attributes.aSeed.array.slice(0, list.length)); assert(new Set(sd.map((x) => x.toFixed(3))).size > Math.min(500, 0.5 * sd.length), 'every bubble needs its own phase/tempo'); }
     assert(/aSolid > \.5\) \{ gl_Position = vec4\(2\./.test(ptsMat.vertexShader) && /aSolid/.test(RH.halo().ptsHalo.material.vertexShader), 'dot (and its halo) hidden where a bubble is drawn');
     assert(sol.material.side === THREE.DoubleSide && sol.material.uniforms.uScale === ptsMat.uniforms.uScale && sol.material.uniforms.uHiA === ptsMat.uniforms.uHiA, 'bubbles follow the dot size / dimming');
     // a module that starts compiling becomes a bubble too, and leaves the list when its flash ends
@@ -651,6 +652,9 @@ load('lib.js'); load('audio.js'); load('app.js');
     // shader sanity (GLSL is not compiled in node)
     const v = sol.material.vertexShader, f = sol.material.fragmentShader, src = window.__fragSrc;
     assert(!/vWob|vBub/.test(src + ptsMat.vertexShader), 'the flat sprite wobble is gone');
+    assert((v.match(/uTime/g) || []).length === 2 && /float T = uTime\*uTempo;/.test(v), 'all bubble motion runs on T = uTime*uTempo');
+    for (const m of v.matchAll(/T\*\(([0-9.]+) \+ ([0-9.]+)\*/g)) assert(parseFloat(m[1]) + parseFloat(m[2]) <= 3.15, 'bubble beat faster than ~2 s: ' + m[0]);
+    assert(!/sin\(uTime\*9\.\)/.test(v), 'no shared fast blink');
     assert(/ax \/= pow\(ax\.x\*ax\.y\*ax\.z, 1\.\/3\.\)/.test(v) && /normal\/ax/.test(v), 'ellipsoid: volume kept, normals transformed with the inverse axes');
     for (const [n, sh] of [['frag', f], ['vert', v], ['dots', src], ['dotsv', ptsMat.vertexShader]]) { for (const m of sh.matchAll(/smoothstep\(\s*([0-9.]+)\s*,\s*([0-9.]+)/g)) assert(parseFloat(m[1]) < parseFloat(m[2]), n + ': reversed smoothstep edges ' + m[0]); assert((sh.match(/\{/g) || []).length === (sh.match(/\}/g) || []).length, n + ': unbalanced braces'); assert((sh.match(/\(/g) || []).length === (sh.match(/\)/g) || []).length, n + ': unbalanced parentheses'); }
     const varyings = (s) => [...s.matchAll(/varying\s+(?:float|vec3)\s+([^;]+);/g)].flatMap((m) => m[1].split(',').map((x) => x.trim())).sort();
