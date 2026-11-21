@@ -1,68 +1,70 @@
-# RH replay – proof tower (VR / desktop viewer)
+# vRiemann – RH replay proof tower (VR / desktop viewer)
 
-Wizualizacja weryfikacji dowodu RH Alpöge'a w Lean: 175 187 modułów jako „wieża” (oś Y = głębokość importu,
-pierścień = moduły danej głębokości, posortowane po nazwie). Wszystko czytane lokalnie – żadnych zapytań do GitHuba.
+A visualization of the Lean verification of Alpöge's RH proof ([alpoge-rh-replay](https://github.com/rohanarun/alpoge-rh-replay)):
+175,187 modules as a "tower" (Y axis = import depth, each ring = the modules of one depth, sorted by name). Everything is read locally – no GitHub requests.
 
-## Uruchomienie
-    python3 build_graph.py            # raz (albo po zmianie indeksu) – układ 3D do data/
-    python3 server.py --host <LAN-IP> --port 8080   # HTTP za reverse proxy (Pangolin kończy TLS)
-    python3 server.py --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # HTTPS dla gogli (WebXR wymaga HTTPS)
+## Running
+    python3 build_graph.py            # once (or after the index changes) – writes the 3D layout to data/
+    python3 server.py --host <LAN-IP> --port 8080   # plain HTTP behind a reverse proxy that terminates TLS
+    python3 server.py --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # HTTPS for headsets (WebXR requires HTTPS)
 
-Serwer czyta: `~/DEV/alpoge-rh-replay/tracker` (indeks, completed.tsv), `~/rh-replay-vol/lean/src` (kod Lean),
-`~/rh-receipts/*/build.log` + `receipt.json` (nasze buildy na żywo), `~/rh-tools/packet.log` (status pętli). Ścieżki: `--repo --vol --receipts --packet-log`.
-Biblioteka A-Frame 1.7.0 (three.js r173) leży w `vendor/` – bez CDN.
+The server reads: `~/DEV/alpoge-rh-replay/tracker` (index, completed.tsv), `~/rh-replay-vol/lean/src` (Lean sources),
+`~/rh-receipts/*/build.log` + `receipt.json` (our live builds), `~/rh-tools/packet.log` (build loop status). Paths: `--repo --vol --receipts --packet-log`.
+A-Frame 1.7.0 (three.js r173) is vendored in `vendor/` – no CDN.
 
-## Sterowanie
-Desktop: przeciągnij = rozglądanie, WASD = ruch, Q/E = winda (głębokość), klik = wybór/przycisk, kółko nad kodem = przewijanie (w miniaturze: rozmiar),
-**B lub M** = wieża ⇄ miniatura, **X** = follow live, **H lub Y** = ukryj/pokaż UI, **R** = panele przed sobą (A to „w lewo”, więc recenter to R). **+ / −** albo Shift+kółko = zoom (0 = reset).
-VR (kontrolery Touch): trigger = wybór/przycisk, lewy drążek ▲▼ = winda, prawy ◀▶ = obrót świata, prawy ▲▼ nad kodem = przewijanie,
-A = ustaw panele przed sobą, B = wieża ⇄ miniatura na stole, X = „follow live”, Y = ukryj/pokaż panele.
+## Controls
+Desktop: drag = look around, WASD = move, Q/E = elevator (depth), click = select / press a button, wheel over the code = scroll (in the miniature: size),
+**B or M** = tower ⇄ miniature, **X** = follow live, **H or Y** = hide/show the UI, **R** = panels in front of me (A is "left", so recenter is R). **+ / −** or Shift+wheel = zoom (0 = reset).
+VR (Touch controllers): trigger = select / button, left stick ▲▼ = elevator, right stick ◀▶ = rotate the world, right stick ▲▼ over the code = scroll,
+A = put the panels in front of me, B = tower ⇄ miniature on a table, X = follow live, Y = hide/show the panels.
 
-## Nagrywanie, miniatura, ręce
-- **H lub Y** (klawiatura) / **Y** (lewy kontroler) – chowa/pokazuje cały interfejs: panele, podpowiedź i przycisk VR. Do nagrań.
-- **Miniature** (B / M): wieża na stole. **Grip** na kontrolerze albo **szczypnięcie w pustą przestrzeń** dłonią chwyta ją i przesuwa/obraca;
-  prawy drążek ▲▼ (desktop: kółko) zmienia rozmiar; **Bring to me** wsuwa oś wieży w Twoją głowę (na wysokości wybranego modułu) –
-  punkty otaczają głowę z bliska. Napisy „depth” same się odwracają: na zewnątrz czytelne z zewnątrz, w środku od środka.
-- **Ręce**: bez kontrolerów widać dłonie (hand tracking); celowanie = linia bark → czubek palca wskazującego, szczypnięcie = klik.
-- **Wybrany moduł** to żywa kula: pełna powierzchnia z płynącymi pasmami i jedną „kometą” na każdy import (tempo rośnie z CPU procesu `lean`,
-  który ten moduł właśnie kompiluje), rdzeń pulsuje i rośnie z pamięcią (RES = rozmiar rezydentny, w większości współdzielone .olean Mathliba),
-  (czas/CPU/RES są w panelu Live build, nad kulą nie ma tekstu). Wokół krążą **deklaracje z kodu** (theorem/lemma/def/instance/axiom; rozmiar = długość, `axiom` na czerwono) –
-  **klik w satelitę przewija kod do tej deklaracji** i ją podświetla.
-  Zmiana wybranego modułu to **płynne przenikanie** (~0,4 s): stara kula gaśnie, nowa się rozjaśnia, oba widać naraz, a miękki łuk z punktem „przekazuje” uwagę od starego do nowego.
-- Panel **Live build**: pasek CPU i RAM maszyny oraz liczba procesów `lean`, żeby było widać, że coś się liczy.
+## Recording, miniature, hands
+- **H or Y** (keyboard) / **Y** (left controller) – hides/shows the whole interface: panels, hint and VR button. For recordings.
+- **Miniature** (B / M): the tower on a table. **Grip** on a controller or a **pinch in empty space** with a hand grabs it to move/rotate it;
+  right stick ▲▼ (desktop: wheel) changes its size; **Bring to me** slides the tower's axis into your head (at the height of the selected module) –
+  the points surround your head up close. The "depth" labels flip by themselves: readable from outside when you are outside, from inside when inside.
+- **Hands**: without controllers you see your hands (hand tracking); aiming = a ray from the shoulder through the index fingertip, pinch = click.
+- **The selected module** is a living sphere: a full surface with flowing bands and one "comet" per import (speed grows with the CPU of the `lean` process
+  compiling that module right now); the core pulses and grows with memory (RES = resident size, mostly shared Mathlib .olean files);
+  time/CPU/RES are in the Live build panel, there is no text over the sphere. **Declarations from the code** orbit around it (theorem/lemma/def/instance/axiom; size = length, `axiom` in red) –
+  **clicking a satellite scrolls the code to that declaration** and highlights it.
+  Changing the selected module is a **smooth crossfade** (~0.4 s): the old sphere fades out, the new one fades in, both are visible at once, and a soft arc with a travelling point "hands over" attention.
+- **Live build** panel: machine CPU and RAM bars plus the number of `lean` processes, so you can see that work is happening.
 
-## Dźwięk (domyślnie wyłączony)
-Generowany na żywo (Web Audio, bez plików), włączany przyciskiem **Sound** w menu albo klawiszem **N** (przeglądarka zaczyna grać dopiero po kliknięciu).
-Trzy ciche warstwy: **tło** (wolny niski „oddech”: jaśniejsze z CPU, głębsze z pamięcią), **nuta za każdy zbudowany moduł** (skala pentatoniczna, głębiej = niżej,
-w VR słychać ją z miejsca modułu w wieży; przerzedzana do ok. 4 na sekundę, max 10 naraz) oraz rzadki **akord** po ukończeniu naszego pakietu.
-Po włączeniu słychać **dwunutowy sygnał potwierdzający**, a zmiana głośności daje krótki dźwięk, więc od razu wiadomo, czy działa. Gdy przeglądarka trzyma dźwięk zawieszony do pierwszego gestu, przycisk pokazuje **„Sound: tap”** i powód;
-każde kliknięcie / klawisz / spust kontrolera ponawia próbę. Poziomy domyślne: nuty około −22…−19 dBFS, tło −40 (spokój) … −28 (obciążenie); test pilnuje, żeby nie zeszły z powrotem do niesłyszalnych.
-Wszystkie liczby do strojenia są na górze `static/audio.js` (`CFG`): głośność, gęstość, jasność, długość wybrzmienia, pogłos. Głośność zapamiętuje przeglądarka.
+## Sound (off by default)
+Generated live (Web Audio, no files), toggled with the **Sound** button in the menu or the **N** key (browsers only play after a click).
+Three quiet layers: a **bed** (a slow low "breath": brighter with CPU, deeper with memory), **a note for every built module** (pentatonic scale, deeper = lower,
+in VR it comes from the module's place in the tower; thinned to ~4 per second, max 10 at once) and a rare **chord** when one of our packets finishes.
+Turning it on plays a **two-note confirmation**, and changing the volume plays a short blip, so you know at once whether it works. When the browser keeps audio suspended until the first gesture, the button shows **"Sound: tap"** and why;
+every click / key / controller trigger retries. Default levels: notes about −22…−19 dBFS, bed −40 (idle) … −28 (load); a test keeps them from drifting back to inaudible.
+All tuning numbers are at the top of `static/audio.js` (`CFG`): volume, density, brightness, decay, reverb. The browser remembers the volume.
 
-## Układ: wieża albo helisa
-Przycisk **Layout** w menu (albo klawisz **L**) przełącza układ: wieża (pierścienie) → helisa ×2 (jak DNA) → ×4 → ×8. Wysokość to nadal głębokość importu (Main na szczycie), więc winda, linijki
-i znacznik Main działają tak samo; **splot = przestrzeń nazw** (wyrównana liczebnościowo, duże przestrzenie dzielone po pakietach), każdy splot to prawoskrętna helisa o promieniu 6 m,
-a moduły siedzą w rurze o promieniu ~0,9 m. Układy (`data/pos_helix{2,4,8}.f32`) generuje `build_graph.py` i są ładowane dopiero przy pierwszym użyciu (2 MB). Przejście jest płynne (1,6 s).
+## Layout: tower or helix
+The **Layout** button in the menu (or the **L** key) cycles the layout: tower (rings) → double helix (like DNA) → ×4 → ×8. Height is still import depth (Main on top), so the elevator, rulers
+and the Main marker work the same; **strand = namespace** (balanced by size, big namespaces split by packet), each strand is a right-handed helix of radius 6 m,
+and the modules sit in a tube of radius ~0.9 m around it. The layouts (`data/pos_helix{2,4,8}.f32`) are generated by `build_graph.py` and loaded on first use (2 MB). The transition is smooth (1.6 s).
 
-## Połączenia (rurki 3D)
-Każde połączenie wybranego modułu (importy cyjan, konsumenci magenta) to prawdziwa **rurka 3D**: oświetlona (światło rozproszone, odblask, poświata krawędzi), nieprzezroczysta,
-więc rurki zasłaniają się nawzajem jak obiekty, wygięta łukiem od osi wieży. Rurki zaczynają się na **powierzchni rdzenia**, a nie w jego środku, i są tam cienkie, więc moduł z wieloma
-połączeniami nie zapycha sobie środka. Wzdłuż każdej biegnie jasne **zgrubienie w kierunku przepływu wiedzy**: importy płyną DO modułu, a od modułu płyną jego konsumenci.
-Rurką jest do 192 połączeń, czyli wszystkie dla ~99,8% modułów; dopiero przy hubach reszta to słaba mgła z cienkich linii. Stroi się to w `RIB` w `app.js`
-(`max`, `segs`, `sides`, `width` = promień, `start`, `minPx`, `speed`, `freq`).
+## Connections (3D tubes)
+Every connection of the selected module (imports cyan, consumers magenta) is a real **3D tube**: lit (diffuse, specular, rim), opaque,
+so tubes hide each other like objects, and bowed away from the tower's axis. Tubes start on the **core's surface**, not at its centre, and are thin there, so a module with many
+connections does not fill its own centre. A bright **bulge travels along each tube in the direction knowledge flows**: imports flow INTO the module, and from the module out to its consumers.
+Up to 192 connections are tubes, i.e. all of them for ~99.8% of modules; only for hubs is the remainder a faint haze of thin lines. Tune it with `RIB` in `app.js`
+(`max`, `segs`, `sides`, `width` = radius, `start`, `minPx`, `speed`, `freq`).
 
-## Poświata (glow)
-Przycisk **Glow** w menu albo klawisz **G**: wyłączona → włączona (miękka aureola wokół punktów zbudowanych / przydzielonych / naszych / kompilowanych) →
-„all” (dodatkowo słaba aureola szarych, jeszcze otwartych punktów; ciężka dla GPU gogli). Aureola to ta sama geometria rysowana drugi raz, większa i addytywna – bez
-kopii danych. Siłę i wielkość stroi się w `GLOW` na początku sekcji glow w `app.js`. Wybór zapamiętuje przeglądarka.
+## Glow
+The **Glow** button in the menu or the **G** key: off → on (a soft halo around built / assigned / ours / compiling points) →
+"all" (also a faint halo around grey, still-open points; heavy for a headset GPU). The halo is the same geometry drawn a second time, larger and additive – no
+data copy. Strength and size are tuned in `GLOW` at the start of the glow section in `app.js`. The browser remembers the choice.
 
-## Co widać
-Kolory: szary = otwarty, niebieski = przydzielony komuś, zielony = zbudowany (inni), złoty = zbudowany przez nas, pulsujący pomarańcz = właśnie się buduje.
-**Closure** (przycisk lub **C**) ma trzy tryby: wyłączone → *dim* (reszta przygaszona do 22%) → *only* (cała reszta znika, zostaje wybór i jego importy).
-Wybrany moduł: cały łańcuch jego importów (cyjan), bezpośredni konsumenci (magenta), kod Lean z podświetleniem (`sorry`/`axiom` na czerwono).
-Widok „Packets” = 2 858 pakietów jako kule (kolor = % zbudowania). „Follow live” wybiera moduł kompilowany najdłużej (kod + przodkowie + winda); ręczny wybór wyłącza follow.
+## What you see
+Colours: grey = open, blue = assigned to someone, green = built (by others), gold = built by us, pulsing orange = building right now.
+**Closure** (button or **C**) has three modes: off → *dim* (everything else dimmed to 22%) → *only* (everything else disappears, leaving the selection and its imports).
+Selected module: the whole chain of its imports (cyan), direct consumers (magenta), Lean code with highlighting (`sorry`/`axiom` in red).
+The "Packets" view = 2,858 packets as spheres (colour = % built). "Follow live" selects the module that has been compiling the longest (code + ancestors + elevator); a manual selection turns follow off.
 
-## Testy
-    node tests/test_lib.js                                   # logika na prawdziwych danych
-    NODE_PATH=<…/node_modules z three@0.173.0> node tests/smoke_app.js [http://127.0.0.1:8443]   # app.js bez przeglądarki
-Nie przetestowane: render GLSL i prawdziwe kontrolery (wymagają przeglądarki / gogli).
+## Tests
+    node tests/test_lib.js                                   # logic on the real data
+    python3 tests/test_phase.py                              # build-loop phase detection
+    node tests/test_audio.js                                 # sound engine with a fake AudioContext
+    NODE_PATH=<…/node_modules with three@0.173.0> node tests/smoke_app.js [http://127.0.0.1:8080]   # app.js without a browser, against a running server
+Not tested: GLSL rendering and real controllers (they need a browser / headset).
