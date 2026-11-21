@@ -822,7 +822,9 @@
     beacon.coreMesh.visible = !sel;                                         // when Main is selected its crowned core takes this place
     beacon.corona.scale.setScalar(1.5 * (1 + 0.07 * Math.sin(T * 1.3)) * (sel ? 1.6 : 1));
   }
-  const FADE_SEC = 0.4, LINK_SEC = 0.7;      // crossfade between two selected modules / lifetime of the hand-over arc
+  // the new module appears in FADE_SEC; the one we leave lingers OUT_SEC, fading and collapsing into its centre, so the camera can follow
+  // the hand-over arc (LINK_SEC long, its bright point travelling for LINK_RUN) from the old module to the new one
+  const FADE_SEC = 0.4, OUT_SEC = 1.2, LINK_SEC = 1.6, LINK_RUN = 1.1;
   const cores = [];                          // two slots: one fades in while the other fades out
   const link = { t: 99, a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), line: null, dot: null };
   function makeLink() {
@@ -846,7 +848,7 @@
   function linkTick(dt) {
     if (!link.line) return;
     if (link.t >= LINK_SEC || S.view !== 'tower') { link.line.visible = link.dot.visible = false; if (link.t < LINK_SEC) link.t = LINK_SEC; return; }
-    link.t += dt; const u = Math.min(1, link.t / LINK_SEC), run = Math.min(1, link.t / (FADE_SEC * 0.9)), e = run * run * (3 - 2 * run);
+    link.t += dt; const u = Math.min(1, link.t / LINK_SEC), run = Math.min(1, link.t / LINK_RUN), e = run * run * (3 - 2 * run);
     link.line.visible = true; link.line.material.opacity = 0.4 * (1 - u) * (1 - u);
     link.dot.visible = run < 1 || u < 1; bez(link.a, link.c, link.b, e, link.dot.position);
     link.dot.material.opacity = 0.9 * Math.min(1, 4 * (1 - u));
@@ -912,14 +914,14 @@
   function coreTick(t, dt) {
     const T = t / 1000;
     for (const c of cores) {
-      const step = dt / FADE_SEC; c.fade += Math.max(-step, Math.min(step, c.target - c.fade));
+      const step = dt / (c.target > c.fade ? FADE_SEC : OUT_SEC); c.fade += Math.max(-step, Math.min(step, c.target - c.fade));
       const vis = S.view === 'tower' && c.fade > 0.002 && c.i >= 0; c.group.visible = vis;
       if (c.i >= 0) c.group.position.set(S.pos[3 * c.i], S.pos[3 * c.i + 1], S.pos[3 * c.i + 2]);      // follows a layout morph
       if (!vis) { if (c.target === 0 && c.fade <= 0.002) c.i = c === core ? c.i : -1; continue; }
       const e = c.fade * c.fade * (3 - 2 * c.fade), tele = c.tele, energy = tele ? Math.min(1, (tele.cpu || 0) / 120) : 0.12;
       const u = c.shellMat.uniforms; u.uTime.value = T; u.uAlpha.value = e; u.uEnergy.value += (energy - u.uEnergy.value) * 0.1; u.uSpeed.value = 0.3 + 1.8 * u.uEnergy.value;
       const st = tele ? 4 : S.st[c.i];
-      const crown = c.i === mainIdx; c.group.scale.setScalar(crown ? CROWN_SCALE : 1);
+      const crown = c.i === mainIdx; c.group.scale.setScalar((crown ? CROWN_SCALE : 1) * (c.target === 0 ? 0.15 + 0.85 * e : 1));   // leaving: collapses inwards
       u.uColor.value.setHex(crown ? GOLD : tele ? 0xff8a3d : STATE_COLOR[st] || STATE_COLOR[0]);
       const r = tele ? 0.035 + 0.06 * Math.min(1, (tele.rssMB || 0) / 8192) : 0.03;
       c.heart.scale.setScalar(r * (1 + 0.18 * Math.sin(T * HEART_W * (1 + 3.5 * u.uEnergy.value))));   // pulse: faster with CPU (half the old rate, so the code stays readable)
@@ -1742,7 +1744,7 @@
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
     const el = $('loading'); if (el) el.remove();
-    window.RH = { FOV_MIN, FOV_MAX, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, link, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
+    window.RH = { FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, link, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }
   boot();
 })();

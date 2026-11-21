@@ -31,7 +31,7 @@ A = put the panels in front of me, B = tower ⇄ miniature on a table, X = follo
   estimates the expected time from the file length with a power law fitted to every module we have built (90th percentile: ~94% finish before it runs out). The nucleus grows
   from a seed to full size, **breathes slowly when a module runs past its estimate**, flashes once when the module is built, and stays full for built modules. **Declarations from the code** orbit around it (theorem/lemma/def/instance/axiom; size = length, `axiom` in red) –
   **clicking a satellite scrolls the code to that declaration** and highlights it.
-  Changing the selected module is a **smooth crossfade** (~0.4 s): the old sphere fades out, the new one fades in, both are visible at once, and a soft arc with a travelling point "hands over" attention.
+  Changing the selected module is a **smooth hand-over**: the new sphere appears in ~0.4 s, the old one lingers ~1.2 s, fading and collapsing into its centre, and a soft arc with a travelling point (~1.1 s) "hands over" attention, slow enough for the camera to follow (`FADE_SEC`, `OUT_SEC`, `LINK_SEC`, `LINK_RUN` in `app.js`).
 - **Live build** panel: machine CPU and RAM bars plus the number of `lean` processes, so you can see that work is happening.
 
 ## Sound (off by default)

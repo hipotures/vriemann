@@ -566,7 +566,7 @@ load('lib.js'); load('audio.js'); load('app.js');
     const c = RH.core(); frame(16, 40); assert(c.fade > 0.99, 'should be fully shown first');
     panels.info.buttons.find((b) => b.label === 'Clear').fn(); assert.strictEqual(S.decls.length, 0); assert.strictEqual(c.target, 0);
     frame(16, 3); assert(c.group.visible && c.fade < 1 && c.fade > 0, 'must be mid-fade, not gone: ' + c.fade);
-    frame(16, 40); assert(!c.group.visible, 'fully faded out after ~0.4 s');
+    frame(16, 30); assert(c.group.visible, 'still collapsing at ~0.5 s'); frame(16, 50); assert(!c.group.visible, 'fully faded out after OUT_SEC (~1.2 s)');
     RH.select(S.depth.indexOf(12)); setView('packets'); RH.select(S.depth.indexOf(12)); frame(16, 40); assert(!RH.cores().some((x) => x.group.visible), 'sphere belongs to the tower view'); setView('tower'); frame(16, 40);
   });
   await t('Main (the whole graph as ancestry) is dimmed so it is not a solid wall; normal modules and Closure off stay at full strength', () => {
@@ -689,6 +689,20 @@ load('lib.js'); load('audio.js'); load('app.js');
     setView('packets'); assert.strictEqual(RH.debugLabels().length, 0, 'packets view: no labels'); setView('tower');
     press('KeyI'); assert(!S.debug && !RH.dbgGroup().visible, 'I again hides them');
   });
+  await t('selection change: the old module lingers ~1.2 s, fading and collapsing inwards; the new one appears in 0.4 s; the arc lasts long enough to follow', () => {
+    setView('tower'); const a = S.depth.indexOf(40), b = S.depth.lastIndexOf(150); RH.select(a); frame(16, 120);
+    RH.select(b); const old = RH.cores().find((x) => x.i === a), neu = RH.core(), L0 = RH.link;
+    assert(old && old !== neu && old.target === 0);
+    frame(16, 25);                                                    // 0.4 s
+    assert(neu.fade > 0.99, 'the new module is fully there after FADE_SEC'); assert(old.group.visible && old.fade > 0.55, 'the old one is still clearly visible at 0.4 s: ' + old.fade.toFixed(2));
+    assert(L0.dot.visible && L0.dot.position.distanceTo(neu.group.position) > 0.05, 'the arc point is still on its way at 0.4 s');
+    frame(16, 25);                                                    // 0.8 s
+    assert(old.group.visible && old.group.scale.x < 0.85 && old.group.scale.x > 0.15, 'collapsing inwards: ' + old.group.scale.x.toFixed(2));
+    frame(16, 25);                                                    // 1.2 s
+    assert(L0.dot.position.distanceTo(neu.group.position) < 0.02, 'the arc point arrives at the new module');
+    frame(16, 10); assert(!old.group.visible, 'gone after OUT_SEC');
+    frame(16, 30); assert(!L0.line.visible, 'arc gone after LINK_SEC');
+  });
   await t('module core is a lit, layered sphere (plasma shader + nucleus inside), animated by state/energy, fading with the crossfade', () => {
     setView('tower'); RH.select(S.depth.indexOf(33)); frame(16, 60); const c = RH.core();
     assert(c.heart.material.isShaderMaterial && c.nucleus.material.isShaderMaterial, 'the core must not be a flat basic material'); assert(c.heart.material.transparent && c.nucleus.scale.x < c.heart.scale.x, 'nucleus sits inside the core');
@@ -697,7 +711,7 @@ load('lib.js'); load('audio.js'); load('app.js');
     const col0 = hu.uColor.value.getHex(); S.status = { ...STATUS, compiling: [{ i: c.i, name: 'x', secs: 5, cpu: 100, rssMB: 4000 }] }; RH.coreTelemetry(); frame(16, 30);
     assert.notStrictEqual(hu.uColor.value.getHex(), col0, 'colour follows the state (compiling = hot)'); assert(hu.uEnergy.value > 0.3);
     S.status = STATUS; RH.coreTelemetry();
-    RH.select(S.depth.indexOf(90)); frame(16, 4); const old = RH.cores().find((x) => x.target === 0 && x.group.visible); assert(old && old.heart.material.uniforms.uAlpha.value < 0.85 * 0.99 && old.heart.material.uniforms.uAlpha.value > 0, 'the old core fades with its sphere');
+    RH.select(S.depth.indexOf(90)); frame(16, 12); const old = RH.cores().find((x) => x.target === 0 && x.group.visible); assert(old && old.heart.material.uniforms.uAlpha.value < 0.85 * 0.99 && old.heart.material.uniforms.uAlpha.value > 0, 'the old core fades with its sphere');
     frame(16, 60);
   });
   await t('glow: halo reuses the dots\' geometry and uniforms, cycles off/on/all with G and the menu, follows the view, buttons do not overlap', () => {
@@ -730,7 +744,8 @@ load('lib.js'); load('audio.js'); load('app.js');
     let prevOld = first.fade, prevNew = second.fade, maxStep = 0;
     for (let k = 0; k < 40; k++) { frame(16, 1); maxStep = Math.max(maxStep, Math.abs(first.fade - prevOld), Math.abs(second.fade - prevNew)); assert(first.fade <= prevOld + 1e-12 && second.fade >= prevNew - 1e-12 && first.fade >= 0 && second.fade <= 1); prevOld = first.fade; prevNew = second.fade; }
     assert(maxStep <= 16 / 1000 / 0.4 + 1e-9, 'a fade step was bigger than allowed: ' + maxStep);
-    assert(!first.group.visible && second.fade === 1, 'old is gone, new is fully shown'); frame(16, 30); assert(!RH.link.line.visible && !RH.link.dot.visible, 'the arc must disappear (~0.7 s)');
+    assert(first.group.visible && second.fade === 1, 'new fully shown at ~0.85 s, the old one still collapsing'); frame(16, 30); assert(!first.group.visible, 'old gone after OUT_SEC');
+    frame(16, 30); assert(!RH.link.line.visible && !RH.link.dot.visible, 'the arc must disappear (LINK_SEC)');
     // the same module selected again (e.g. closure toggled) must not restart anything
     const slot = RH.core(); RH.select(i2, true); assert.strictEqual(RH.core(), slot); assert.strictEqual(slot.fade, 1); assert.strictEqual(RH.cores().filter((x) => x.target === 1).length, 1);
   });
