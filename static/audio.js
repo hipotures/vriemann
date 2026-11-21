@@ -1,4 +1,4 @@
-/* Procedural sound for the proof tower (Web Audio, no files).  Off by default; the browser only allows audio after a
+/* Procedural sound for the VRiemann viewer (Web Audio, no files).  Off by default; the browser only allows audio after a
  * click, so nothing can start by itself.  Three layers, all deliberately quiet:
  *   1. bed     - slow low "breathing" drone; brighter with CPU load, deeper with memory use
  *   2. notes   - one soft pentatonic note per module that has just been built, placed where the module is in the tower

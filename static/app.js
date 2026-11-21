@@ -1,4 +1,4 @@
-/* RH replay – proof tower viewer.  A-Frame shell + one THREE.Points cloud + canvas panels. */
+/* VRiemann – 3D / VR viewer of the RH proof replay.  A-Frame shell + one THREE.Points cloud + canvas panels. */
 (function () {
   'use strict';
   const showErr = (m) => { const el = document.getElementById('loading'); if (el) { el.style.color = '#ff8a8a'; el.textContent = 'error: ' + m; } };

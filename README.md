@@ -1,7 +1,7 @@
-# VRiemann – RH replay proof tower (VR / desktop viewer)
+# VRiemann – the RH proof replay, live in 3D and VR
 
 A visualization of the Lean verification of Alpöge's RH proof ([alpoge-rh-replay](https://github.com/rohanarun/alpoge-rh-replay)):
-175,187 modules as a "tower" (Y axis = import depth, each ring = the modules of one depth, sorted by name). Everything is read locally – no GitHub requests.
+175,187 modules in 3D, height = import depth (Main on top): a tower of rings (the default), a double / ×4 / ×8 helix, a miniature on a table, or the 2,858 packets as spheres. Everything is read locally – no GitHub requests.
 
 ## Quick start
 Needs only Python 3 (standard library, no packages; tested with 3.14) and a modern browser. Works offline after the clone.
