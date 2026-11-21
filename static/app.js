@@ -220,10 +220,10 @@
   // ------------------------------------------------------------------ 3D bubbles: the connected (imports / consumers) and compiling modules
   // are real instanced ellipsoids, not sprites: they have depth, can be cut by a controller, and wobble in all three axes like soap bubbles.
   // Up to SOLID.max of them (live ones first, then the connected nearest to the selection); the rest stay plain dots.
-  const SOLID = { max: 4000, segs: 24, rings: 16, minPx: 1.1, wobble: 0.22, tempo: 1.0 };      // tempo: 1 = shape periods ~5-16 s, compiling beat ~2-3.5 s
+  const SOLID = { max: 4000, segs: 24, rings: 16, minPx: 1.1, wobble: 0.22, tempo: 1.0, liveSize: 0.45 };   // liveSize: compiling bubbles (G) relative to the old pulsing dot; 0.45 = never bigger than ~1.1x an import bubble      // tempo: 1 = shape periods ~5-16 s, compiling beat ~2-3.5 s
   const SOLID_V = `
     attribute vec3 aCenter; attribute float aKind, aSeed;
-    uniform float uTime, uSize, uScale, uWorldScale, uHiA, uHiS, uMinPx, uWobble, uTempo;
+    uniform float uTime, uSize, uScale, uWorldScale, uHiA, uHiS, uMinPx, uWobble, uTempo, uLiveSize;
     varying vec3 vN, vV, vCol; varying float vA, vSeed;
     void main(){
       float h = aSeed, h2 = fract(h*13.37), h3 = fract(h*71.11);                              // independent per-bubble randoms
@@ -240,7 +240,7 @@
       vec3 col; float s, a = 1.;
       if (aKind < 1.5) { col = vec3(0., 1., 1.); s = 1.7*uHiS; a = uHiA; }
       else if (aKind < 2.5) { col = vec3(1., .3, .9); s = 1.7; }
-      else { float p = .5 + .5*sin(T*(1.8 + 1.3*h3) + 6.2832*h2); col = mix(vec3(1., .40, .10), vec3(1.), p); s = 2.4 + 1.6*p; }   // compiling: own beat each, ~2-3.5 s
+      else { float p = .5 + .5*sin(T*(1.8 + 1.3*h3) + 6.2832*h2); col = mix(vec3(1., .40, .10), vec3(1.), p); s = uLiveSize*(2.4 + 1.6*p); }   // compiling: own beat each, ~2-3.5 s
       s *= 1.1 + .10*sin(T*(.45 + .6*h3) + 6.2832*h2);                                         // slow breath, ~6-14 s
       vec4 c = modelViewMatrix*vec4(aCenter, 1.);
       float r = max(.5*uSize*uScale*s, uMinPx*max(-c.z, .05)/(projectionMatrix[1][1]*500.));   // same size as the dot it replaces, never below ~2 px
@@ -1108,7 +1108,7 @@
     sg.instanceCount = 0;
     const pu = ptsMat.uniforms;
     solids = new THREE.Mesh(sg, new THREE.ShaderMaterial({ vertexShader: SOLID_V, fragmentShader: SOLID_F, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-      uniforms: { uTime: pu.uTime, uSize: pu.uSize, uScale: pu.uScale, uHiA: pu.uHiA, uHiS: pu.uHiS, uWorldScale: { value: 1 }, uMinPx: { value: SOLID.minPx }, uWobble: { value: SOLID.wobble }, uTempo: { value: SOLID.tempo } } }));
+      uniforms: { uTime: pu.uTime, uSize: pu.uSize, uScale: pu.uScale, uHiA: pu.uHiA, uHiS: pu.uHiS, uWorldScale: { value: 1 }, uMinPx: { value: SOLID.minPx }, uWobble: { value: SOLID.wobble }, uTempo: { value: SOLID.tempo }, uLiveSize: { value: SOLID.liveSize } } }));
     solids.frustumCulled = false; solids.renderOrder = 1; world.add(solids);
     dbgGroup = new THREE.Group(); dbgGroup.visible = !!S.debug; world.add(dbgGroup);
 

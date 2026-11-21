@@ -656,6 +656,7 @@ load('lib.js'); load('audio.js'); load('app.js');
     assert((v.match(/uTime/g) || []).length === 2 && /float T = uTime\*uTempo;/.test(v), 'all bubble motion runs on T = uTime*uTempo');
     for (const m of v.matchAll(/T\*\(([0-9.]+) \+ ([0-9.]+)\*/g)) assert(parseFloat(m[1]) + parseFloat(m[2]) <= 3.15, 'bubble beat faster than ~2 s: ' + m[0]);
     assert(!/sin\(uTime\*9\.\)/.test(v), 'no shared fast blink');
+    assert(/s = uLiveSize\*\(2\.4 \+ 1\.6\*p\)/.test(v) && RH.SOLID.liveSize * 4.0 * 1.2 <= 1.7 * 1.2 * 1.1, 'compiling bubbles (G) at most ~1.1x an import bubble, so they cannot hide the core');
     assert(/ax \/= pow\(ax\.x\*ax\.y\*ax\.z, 1\.\/3\.\)/.test(v) && /normal\/ax/.test(v), 'ellipsoid: volume kept, normals transformed with the inverse axes');
     for (const [n, sh] of [['frag', f], ['vert', v], ['dots', src], ['dotsv', ptsMat.vertexShader]]) { for (const m of sh.matchAll(/smoothstep\(\s*([0-9.]+)\s*,\s*([0-9.]+)/g)) assert(parseFloat(m[1]) < parseFloat(m[2]), n + ': reversed smoothstep edges ' + m[0]); assert((sh.match(/\{/g) || []).length === (sh.match(/\}/g) || []).length, n + ': unbalanced braces'); assert((sh.match(/\(/g) || []).length === (sh.match(/\)/g) || []).length, n + ': unbalanced parentheses'); }
     const varyings = (s) => [...s.matchAll(/varying\s+(?:float|vec3)\s+([^;]+);/g)].flatMap((m) => m[1].split(',').map((x) => x.trim())).sort();
