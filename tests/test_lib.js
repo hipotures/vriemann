@@ -254,6 +254,19 @@ t('buildFibers: counts, start on the core surface, exact far end, leaves the cor
   let minDot = 1; for (let x = 0; x < 8; x++) for (let y = x + 1; y < 8; y++) minDot = Math.min(minDot, dot(fan[x], fan[y])); assert(minDot < 0.9, 'fan-out: ' + minDot);
   const Z = L.buildFibers([{ a: [0, 0, 0], b: [0, 5, 0], kind: 0, phase: 0.3 }], 8, 0.2); assert([...Z.pos, ...Z.tan].every(Number.isFinite));
 });
+t('critical line: 30 real zeta zeros, denser upwards; the blink runs bottom -> top, accelerating, one blink per zero per cycle, then dark', () => {
+  const Z = L.ZETA_ZEROS; assert.strictEqual(Z.length, 30); assert(Math.abs(Z[0] - 14.134725) < 1e-6 && Math.abs(Z[1] - 21.02204) < 1e-5 && Math.abs(Z[29] - 101.317851) < 1e-6);
+  for (let k = 1; k < Z.length; k++) assert(Z[k] > Z[k - 1]);
+  const H = L.zeroHeights(Z); assert.strictEqual(H[0], 0); assert.strictEqual(H[29], 1);
+  const sweep = 4, cycle = 6, decay = 0.3, f = (h, t) => L.zeroFlash(h, t, sweep, cycle, decay);
+  // the moment each zero lights up, found by scanning time
+  const on = H.map((h) => { for (let t = 0; t < cycle; t += 0.001) if (f(h, t) > 0.99) return t; return -1; });
+  assert(on.every((t) => t >= 0 && t <= sweep + 0.01), 'every zero blinks within the sweep');
+  for (let k = 1; k < 30; k++) assert(on[k] > on[k - 1], 'bottom to top');
+  const iv = on.slice(1).map((t, k) => t - on[k]); assert(iv[0] > 4 * iv[iv.length - 1], 'faster and faster: first gap ' + iv[0].toFixed(3) + ' s, last ' + iv[iv.length - 1].toFixed(3) + ' s');
+  // a blink dies out: shortly after, the zero is dark again until the next cycle; and the whole line repeats every cycle
+  for (const h of [0, 0.5, 1]) { const t0 = sweep * Math.sqrt(h); assert(f(h, t0 + 1.5) < 0.01, 'blink decays'); assert(f(h, t0 - 0.01) < 1e-3, 'dark before'); assert(Math.abs(f(h, t0 + 0.1) - f(h, t0 + 0.1 + cycle)) < 1e-9, 'periodic'); }
+});
 t('packetStats + colour helpers', () => {
   const st = new Uint8Array(n).map((_, i) => i % 4); const pk = new Uint16Array(fs.readFileSync(path.join(D, 'packet.u16')).buffer.slice(0));
   const ps = L.packetStats(n, pk, st, meta.packets);

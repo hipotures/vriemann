@@ -258,6 +258,19 @@
     return { pos, tan, side, t, dir, phase, kind, index, dock, vertexCount: V, indexCount: I };
   }
 
+  // ---- the critical line above Main: the first 30 non-trivial zeros of zeta (imaginary parts, all on Re s = 1/2)
+  const ZETA_ZEROS = [14.134725, 21.022040, 25.010858, 30.424876, 32.935062, 37.586178, 40.918719, 43.327073, 48.005151, 49.773832,
+    52.970321, 56.446248, 59.347044, 60.831779, 65.112544, 67.079811, 69.546402, 72.067158, 75.704691, 77.144840,
+    79.337375, 82.910381, 84.735493, 87.425275, 88.809111, 92.491899, 94.651344, 95.870634, 98.831194, 101.317851];
+  /** 0..1 height of every zero along the line: proportional to its imaginary part, so they get denser upwards, as the real ones do */
+  const zeroHeights = (zs) => zs.map((g) => (g - zs[0]) / (zs[zs.length - 1] - zs[0]));
+  /** Runway "rabbit": a flash runs up the line, accelerating (height ~ time^2), and every zero blinks when it passes.
+   *  Returns the blink brightness 0..1 of a zero at height h (0..1) at time t (s); the same formula is in the GLSL. */
+  function zeroFlash(h, t, sweep, cycle, decay) {
+    const tau = ((t % cycle) + cycle) % cycle, dt = tau - sweep * Math.sqrt(h);
+    return dt >= 0 ? Math.exp(-dt / decay) : 0;
+  }
+
   /** angle wrapped to (-PI, PI] */
   const wrapPi = (a) => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
 
@@ -338,6 +351,6 @@
   const fmt = (x) => String(Math.round(x)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const pct = (a, b) => (b ? (100 * a / b).toFixed(1) : '0.0') + '%';
 
-  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, buildTubes, buildFibers, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
+  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, buildTubes, buildFibers, ZETA_ZEROS, zeroHeights, zeroFlash, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.RHLib = api;
 })(typeof self !== 'undefined' ? self : this);

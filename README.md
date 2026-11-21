@@ -62,6 +62,12 @@ The **Glow** button in the menu or the **G** key: off → on (a soft halo around
 "all" (also a faint halo around grey, still-open points; heavy for a headset GPU). The halo is the same geometry drawn a second time, larger and additive – no
 data copy. Strength and size are tuned in `GLOW` at the start of the glow section in `app.js`. The browser remembers the choice.
 
+## Main and the critical line
+Main (the final theorem, depth 202) has a golden landmark: a star, three turning rings and a corona. Above it rises the **critical line**: a thin warm line with the
+**first 30 non-trivial zeros of zeta** on it, at heights proportional to their imaginary parts (14.13, 21.02, 25.01, …, 101.32), so they get denser upwards like the real ones.
+Like the sequenced approach lights of a runway (or an obstruction light for passing mathematicians), a blink runs up the line every 6 s, faster and faster, and each zero
+flashes with a short horizontal flare as it is passed. Tune it with `ZERO` in `app.js` (`y0`, `span`, `sweep`, `cycle`, `decay`).
+
 ## What you see
 Colours: grey = open, blue = assigned to someone, green = built (by others), gold = built by us, pulsing orange = building right now.
 **Closure** (button or **C**) has three modes: off → *dim* (everything else dimmed to 22%) → *only* (everything else disappears, leaving the selection and its imports).

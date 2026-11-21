@@ -725,9 +725,13 @@
     return { group, shell, shellMat, heart, nucleus, sats, orbit: [], satPos: [], tele: null, t: 0, i: -1, fade: 0, target: 0, decls: [] };
   }
   const STATE_COLOR = [0x6f7d99, 0x598cff, 0x40d973, 0xffd133];
-  // ---- Main: the final theorem. A landmark that is always visible at the top of the tower (golden star, three turning rings, a shaft of light, a corona);
+  // ---- Main: the final theorem. A landmark that is always visible at the top of the tower (golden star, three turning rings, a corona,
+  //      and above it the CRITICAL LINE: a thin line with the first 30 zeros of zeta at heights proportional to their imaginary parts.
+  //      Like the sequenced approach lights of a runway / an obstruction light for passing mathematicians, a blink runs up the line, faster and
+  //      faster (height ~ time^2, and the zeros get denser upwards), each zero flashing with a short horizontal flare as it is passed);
   //      when Main is selected its core becomes a crowned, larger, golden version of the normal one.
   const GOLD = 0xffd36b, GOLD_HOT = 0xffeeb8, BEACON_H = 14, CROWN_SCALE = 2.2;
+  const ZERO = { y0: 0.9, span: 13.0, sweep: 4.0, cycle: 6.0, decay: 0.30 };   // first zero 0.9 m above Main, last one 13 m higher; one run up every 6 s
   let beacon = null, mainIdx = -1;
   function makeBeacon() {
     const group = new THREE.Group(); group.visible = false;
@@ -735,22 +739,46 @@
     const coreMesh = new THREE.Mesh(new THREE.SphereGeometry(0.12, 28, 20), coreMat);
     const ringMat = (hex) => new THREE.MeshBasicMaterial({ color: hex, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false });
     const rings = [[0.34, GOLD], [0.46, GOLD_HOT], [0.60, 0xffb347]].map(([r, hex], k) => { const m = new THREE.Mesh(new THREE.TorusGeometry(r, 0.006, 8, 120), ringMat(hex)); m.rotation.set(k * 1.1, k * 0.7, 0); return m; });
+    // the critical line itself: thin, warm, fading out at the top
     const beamMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: { uTime: { value: 0 } },
       vertexShader: 'varying float vY; void main(){ vY = uv.y; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }',
-      fragmentShader: 'uniform float uTime; varying float vY; void main(){ float a = pow(1. - vY, 2.)*(.30 + .10*sin(uTime*1.7 + vY*9.)); gl_FragColor = vec4(1., .86, .45, a); }' });
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.09, BEACON_H, 16, 1, true), beamMat); beam.position.y = BEACON_H / 2;
+      fragmentShader: 'uniform float uTime; varying float vY; void main(){ float a = .55*(1. - smoothstep(.85, 1., vY)); gl_FragColor = vec4(1., .55, .22, a); }' });
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, BEACON_H, 8, 1, true), beamMat); beam.position.y = ZERO.y0 + BEACON_H / 2 - 0.4;
+    // the zeros: one camera-facing quad each; the blink and its horizontal flare are computed in the shader from the time
+    const H = L.zeroHeights(L.ZETA_ZEROS), nz = H.length, zp = new Float32Array(nz * 4 * 3), zc = new Float32Array(nz * 4 * 2), zh = new Float32Array(nz * 4), zi = [];
+    H.forEach((h, k) => { for (let q = 0; q < 4; q++) { const v = 4 * k + q; zp[3 * v + 1] = ZERO.y0 + h * ZERO.span; zc[2 * v] = q & 1 ? 1 : -1; zc[2 * v + 1] = q & 2 ? 1 : -1; zh[v] = h; } zi.push(4 * k, 4 * k + 1, 4 * k + 2, 4 * k + 1, 4 * k + 3, 4 * k + 2); });
+    const zg = new THREE.BufferGeometry(); zg.setAttribute('position', new THREE.BufferAttribute(zp, 3)); zg.setAttribute('aCorner', new THREE.BufferAttribute(zc, 2)); zg.setAttribute('aH', new THREE.BufferAttribute(zh, 1)); zg.setIndex(zi);
+    const zeroMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { uTime: { value: 0 }, uSweep: { value: ZERO.sweep }, uCycle: { value: ZERO.cycle }, uDecay: { value: ZERO.decay }, uWS: { value: 1 } },
+      vertexShader: `attribute vec2 aCorner; attribute float aH; uniform float uTime, uSweep, uCycle, uDecay, uWS; varying vec2 vC; varying float vF;
+        void main(){
+          float tau = mod(uTime, uCycle), dt = tau - uSweep*sqrt(aH);
+          vF = dt >= 0. ? exp(-dt/uDecay) : 0.;                                   // same formula as zeroFlash() in lib.js
+          vec2 ext = vec2(mix(.10, 1.0, vF), .10);                                 // the quad is only wide while it flashes
+          vC = aCorner*ext;
+          vec4 mv = modelViewMatrix*vec4(position, 1.); mv.xy += vC*uWS;
+          gl_Position = projectionMatrix*mv;
+        }`,
+      fragmentShader: `varying vec2 vC; varying float vF;
+        void main(){
+          float r = length(vC)/(.032*(1. + .6*vF)), dot = exp(-r*r*1.4);
+          float flare = exp(-abs(vC.y)/.007)*exp(-abs(vC.x)/.30)*vF;              // horizontal streak, only during the blink
+          vec3 col = vec3(1., .94, .84)*dot*(.35 + 1.9*vF) + vec3(1., .86, .66)*flare*1.3;
+          gl_FragColor = vec4(col, 1.);
+        }` });
+    const zeros = new THREE.Mesh(zg, zeroMat); zeros.frustumCulled = false;
     const cv = document.createElement('canvas'); cv.width = cv.height = 128; const x = cv.getContext('2d'), gr = x.createRadialGradient(64, 64, 2, 64, 64, 64);
     gr.addColorStop(0, 'rgba(255,238,184,.95)'); gr.addColorStop(0.25, 'rgba(255,200,90,.35)'); gr.addColorStop(1, 'rgba(255,170,60,0)'); x.fillStyle = gr; x.fillRect(0, 0, 128, 128);
     const ct = new THREE.CanvasTexture(cv); ct.colorSpace = THREE.SRGBColorSpace;
     const corona = new THREE.Sprite(new THREE.SpriteMaterial({ map: ct, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false })); corona.scale.set(1.5, 1.5, 1);
-    group.add(coreMesh, ...rings, beam, corona);
-    return { group, coreMesh, coreMat, rings, beam, beamMat, corona };
+    group.add(coreMesh, ...rings, beam, zeros, corona);
+    return { group, coreMesh, coreMat, rings, beam, beamMat, zeros, zeroMat, corona };
   }
   function beaconTick(t, dt) {
     if (!beacon) return;
     const T = t / 1000; beacon.group.visible = S.view === 'tower'; beacon.group.position.set(S.pos[3 * mainIdx], S.pos[3 * mainIdx + 1], S.pos[3 * mainIdx + 2]);
     beacon.rings.forEach((m, k) => { m.rotation.x += dt * (0.25 + 0.1 * k); m.rotation.y += dt * (0.18 - 0.06 * k); });
-    beacon.coreMat.uniforms.uTime.value = T; beacon.beamMat.uniforms.uTime.value = T;
+    beacon.coreMat.uniforms.uTime.value = T; beacon.beamMat.uniforms.uTime.value = T; beacon.zeroMat.uniforms.uTime.value = T; beacon.zeroMat.uniforms.uWS.value = world ? world.scale.x : 1;
     const sel = core && core.target === 1 && core.i === mainIdx;
     beacon.coreMesh.visible = !sel;                                         // when Main is selected its crowned core takes this place
     beacon.corona.scale.setScalar(1.5 * (1 + 0.07 * Math.sin(T * 1.3)) * (sel ? 1.6 : 1));

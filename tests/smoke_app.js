@@ -477,8 +477,19 @@ load('lib.js'); load('audio.js'); load('app.js');
     const mp = new THREE.Vector3(S.pos[3 * mi], S.pos[3 * mi + 1], S.pos[3 * mi + 2]); assert(b.group.position.distanceTo(mp) < 1e-9, 'beacon sits on Main');
     assert(S.depth[mi] === S.meta.maxDepth, 'Main is the deepest module (top of the tower)'); assert(b.group.visible && b.coreMesh.visible, 'visible even with nothing selected');
     assert.strictEqual(b.rings.length, 3); const r0 = b.rings.map((m) => m.rotation.x + m.rotation.y); frame(16, 30); const r1 = b.rings.map((m) => m.rotation.x + m.rotation.y);
-    assert(r0.every((v, k) => v !== r1[k]), 'the rings must turn'); assert(b.beam.position.y > 5 && b.beam.material.blending === THREE.AdditiveBlending, 'a shaft of light goes up from Main');
-    assert(/pow\(1\. - vY, 2\.\)/.test(b.beamMat.fragmentShader) && !/smoothstep\(\s*1/.test(b.beamMat.fragmentShader), 'beam shader');
+    assert(r0.every((v, k) => v !== r1[k]), 'the rings must turn');
+    // the critical line: thin, going up from Main; on it the first 30 zeros of zeta, at heights proportional to their imaginary parts
+    assert(b.beam.position.y > 5 && b.beam.material.blending === THREE.AdditiveBlending, 'the critical line goes up from Main');
+    assert(b.beam.geometry.parameters.radiusTop <= 0.006 && b.beam.geometry.parameters.radiusBottom <= 0.006, 'a THIN line, not a shaft');
+    const zp = b.zeros.geometry.attributes.position, zh = b.zeros.geometry.attributes.aH, Z = global.RHLib.ZETA_ZEROS; assert.strictEqual(zp.count, 4 * Z.length, 'a quad per zero');
+    const bt = b.beam.position.y - b.beam.geometry.parameters.height / 2, tp = b.beam.position.y + b.beam.geometry.parameters.height / 2;
+    for (let k = 0; k < Z.length; k++) { const y = zp.getY(4 * k), want = (Z[k] - Z[0]) / (Z[Z.length - 1] - Z[0]);
+      assert(Math.abs(zh.getX(4 * k) - want) < 1e-6, 'zero ' + k + ' height follows its imaginary part'); assert(y > bt && y < tp, 'zero ' + k + ' sits on the line'); assert(zp.getX(4 * k) === 0 && zp.getZ(4 * k) === 0); }
+    const gaps = []; for (let k = 1; k < Z.length; k++) gaps.push(zp.getY(4 * k) - zp.getY(4 * k - 4)); assert(gaps.every((g) => g > 0) && gaps[0] > 2.5 * gaps[gaps.length - 1], 'denser upwards');
+    const zv = b.zeroMat.vertexShader, zf = b.zeroMat.fragmentShader;
+    assert(zv.includes('mod(uTime, uCycle)') && zv.includes('uSweep*sqrt(aH)') && zv.includes('exp(-dt/uDecay)'), 'blink formula = L.zeroFlash'); assert(zf.includes('flare') && /\*vF/.test(zf), 'horizontal flare only while blinking');
+    assert(b.zeroMat.blending === THREE.AdditiveBlending && !b.zeroMat.depthWrite); const zt = b.zeroMat.uniforms.uTime.value; frame(16, 5); assert(b.zeroMat.uniforms.uTime.value > zt, 'the blinks run');
+    for (const sh of [zv, zf]) for (const x of sh.matchAll(/smoothstep\(\s*([0-9.]+)\s*,\s*([0-9.]+)/g)) assert(parseFloat(x[1]) < parseFloat(x[2]));
     setView('packets'); frame(); assert(!b.group.visible, 'only in the tower view'); setView('tower'); frame(); assert(b.group.visible);
     // selecting Main: crowned core
     RH.select(mi); frame(16, 60); const c = RH.core(); assert.strictEqual(c.i, mi);
