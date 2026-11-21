@@ -14,7 +14,7 @@ A-Frame 1.7.0 (three.js r173) is vendored in `vendor/` – no CDN.
 
 ## Controls
 Desktop: drag = look around, WASD = move, Q/E = elevator (depth), click = select / press a button, wheel over the code = scroll (in the miniature: size),
-**B or M** = tower ⇄ miniature, **X** = follow live, **H or Y** = hide/show the UI, **R** = panels in front of me (A is "left", so recenter is R). **K** = connection style (fibres / tubes), **+ / −** or Shift+wheel = zoom (0 = reset).
+**B or M** = tower ⇄ miniature, **X** = follow live (off → camera → in place), **H or Y** = hide/show the UI, **R** = panels in front of me (A is "left", so recenter is R). **K** = connection style (fibres / tubes), **+ / −** or Shift+wheel = zoom (0 = reset).
 VR (Touch controllers): trigger = select / button, left stick ▲▼ = elevator, right stick ◀▶ = rotate the world, right stick ▲▼ over the code = scroll,
 A = put the panels in front of me, B = tower ⇄ miniature on a table, X = follow live, Y = hide/show the panels.
 
@@ -72,7 +72,7 @@ flashes with a short horizontal flare as it is passed. Tune it with `ZERO` in `a
 Colours: grey = open, blue = assigned to someone, green = built (by others), gold = built by us, pulsing orange = building right now.
 **Closure** (button or **C**) has three modes: off → *dim* (everything else dimmed to 22%) → *only* (everything else disappears, leaving the selection and its imports).
 Selected module: the whole chain of its imports (cyan), direct consumers (magenta), Lean code with highlighting (`sorry`/`axiom` in red).
-The "Packets" view = 2,858 packets as spheres (colour = % built). "Follow live" selects the module that has been compiling the longest (code + ancestors + elevator); a manual selection turns follow off.
+The "Packets" view = 2,858 packets as spheres (colour = % built). "Follow live" (X) cycles off → **camera** (selects the module that has been compiling the longest and takes you there: elevator + turning the tower) → **in place** (the scene stays still, only the selection moves: each new module gets its core, links and code where it is) → off. A manual selection turns follow off.
 
 ## Tests
     node tests/test_lib.js                                   # logic on the real data

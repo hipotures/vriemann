@@ -12,7 +12,7 @@
     layout: 'tower', links: 'fibers', layoutTarget: 'tower', layouts: {}, layoutLoading: false, layoutError: '', morph: null, glow: 1, fov: 80, bringPrev: null, glowAuto: false, frameMs: 0, slowMs: 0, yawTarget: null, ys: { v: 0 }, decls: [], hoverSat: -1, hand: 'right', scale: 0.08, grab: null, uiHidden: false, followTarget: -1, fs: { v: 0 }, nodeDist: { right: null, left: null }, lastNodeDist: null,
     n: 0, meta: null, pos: null, depth: null, ns: null, pk: null, ids: null, names: null, nameIdx: null,
     csr: null, st: null, stF: null, hiF: null,
-    view: 'tower', color: 0, hideOpen: false, closureOn: true, closureOnly: false, follow: false, mini: false,
+    view: 'tower', color: 0, hideOpen: false, closureOn: true, closureOnly: false, follow: false, followStill: false, mini: false,
     sel: -1, selPk: -1, hover: -1, hoverPk: -1, hoverBtn: null, ancestors: 0, impCur: 0, conCur: 0,
     live: new Map(), dirtyState: false, lastUpload: 0, focus: 10, focusTarget: null,
     ax: { lx: 0, ly: 0, rx: 0, ry: 0 }, keys: { up: false, down: false },
@@ -317,7 +317,7 @@
     text(c, 'OPTIONS', 40, y, { size: 20, color: '#7283a6', weight: 700 });
     p.button(c, 40, y + 12, 260, 64, 'Hide open', () => { S.hideOpen = !S.hideOpen; applyUniforms(); p.dirty = true; }, S.hideOpen);
     p.button(c, 320, y + 12, 260, 64, S.closureOn ? (S.closureOnly ? 'Closure: only' : 'Closure: dim') : 'Closure: off', cycleClosure, S.closureOn);
-    p.button(c, 600, y + 12, 260, 64, 'Follow live', toggleFollow, S.follow);
+    p.button(c, 600, y + 12, 260, 64, !S.follow ? 'Follow live' : S.followStill ? 'Follow: in place' : 'Follow: camera', toggleFollow, S.follow);
     y += 90;
     p.button(c, 40, y + 12, 260, 64, S.mini ? 'Inside' : 'Miniature', toggleMini, S.mini);
     p.button(c, 320, y + 12, 260, 64, 'Recenter', recenter, false);
@@ -1245,17 +1245,23 @@
     if (S.sel >= 0) select(S.sel, true); else applyUniforms();
     if (panels.menu) panels.menu.dirty = true;
   }
+  /** Follow live cycles: off -> camera (jump + turn to each new module) -> in place (the scene stays still, only the selection
+   *  moves to each new module: its core, links and code appear where it is) -> off */
   function toggleFollow() {
-    S.follow = !S.follow; S.followTarget = -1; panels.menu.dirty = true;
+    if (!S.follow) { S.follow = true; S.followStill = false; }
+    else if (!S.followStill) S.followStill = true;
+    else { S.follow = false; S.followStill = false; }
+    S.followTarget = -1; panels.menu.dirty = true;
     if (S.follow) { followStep(S.status && S.status.compiling); pollStatus(); }
   }
-  function stopFollow() { if (S.follow) { S.follow = false; S.followTarget = -1; panels.menu.dirty = true; } }
+  function stopFollow() { if (S.follow) { S.follow = false; S.followStill = false; S.followTarget = -1; panels.menu.dirty = true; } }
   /** Follow live: show the module Lean has been compiling the longest (heavy = interesting; a fast one would flicker). */
   function followStep(comp) {
     if (!S.follow || !comp || !comp.length) return;
     const t = comp.slice().sort((a, b) => b.secs - a.secs)[0];
     if (t.i === S.followTarget) return;
-    S.followTarget = t.i; jumpTo(t.i);
+    S.followTarget = t.i;
+    if (S.followStill) { if (S.view === 'tower') select(t.i); } else jumpTo(t.i);
   }
   /**
    * Turn the tower (about its own axis) so module i ends up straight ahead.  Inside the tower "ahead" is where the
@@ -1528,7 +1534,7 @@
     let up = (S.keys.up ? 1 : 0) - (S.keys.down ? 1 : 0) - S.ax.ly;
     if (Math.abs(S.ax.ly) < 0.15) up = (S.keys.up ? 1 : 0) - (S.keys.down ? 1 : 0);
     if (!S.mini) {
-      if (Math.abs(up) > 0.15) { S.focusTarget = null; S.fs.v = 0; if (S.follow) { S.follow = false; panels.menu.dirty = true; } S.focus = clampFocus(S.focus + up * 4 * dt); }
+      if (Math.abs(up) > 0.15) { S.focusTarget = null; S.fs.v = 0; if (S.follow && !S.followStill) { S.follow = false; panels.menu.dirty = true; } S.focus = clampFocus(S.focus + up * 4 * dt); }
       else if (S.focusTarget != null) {
         // eases in AND out (spring with a speed limit): no abrupt start, no snap at the end, max 4 m/s ≈ 40 depth levels/s
         S.focus = L.smoothDamp(S.focus, S.focusTarget, S.fs, 1.1, 4, dt);

@@ -69,7 +69,7 @@ load('lib.js'); load('audio.js'); load('app.js');
     click('Packets'); assert.strictEqual(S.view, 'packets'); click('Modules'); assert.strictEqual(S.view, 'tower');
     click('Namespace'); assert.strictEqual(S.color, 1); click('State'); click('Hide open'); assert(S.hideOpen); click('Hide open');
     click('Miniature'); assert(S.mini); frame(); click('Inside'); assert(!S.mini);
-    click('Main.lean'); assert.strictEqual(S.names[S.sel], 'Main'); click('Follow live'); assert(S.follow); click('Follow live');
+    click('Main.lean'); assert.strictEqual(S.names[S.sel], 'Main'); click('Follow live'); assert(S.follow && !S.followStill); frame(); click('Follow: camera'); assert(S.follow && S.followStill); frame(); click('Follow: in place'); assert(!S.follow && !S.followStill);
     frame(16, 5);
   });
   await t('ray picking through interact(): hover then click selects the aimed module', () => {
@@ -192,6 +192,17 @@ load('lib.js'); load('audio.js'); load('app.js');
     await until(() => S.src.tok); frame(); assert(S.src.tok, 'source of the followed module did not load'); assert(panels.source.mesh.visible);
     // a manual pick switches follow off, and later compile updates no longer take over
     RH.stopFollow(); assert(!S.follow); RH.followStep([{ i: A, secs: 999 }]); assert.strictEqual(S.sel, B);
+    // "in place": the selection follows, but the scene does not move (no elevator, no turning the tower)
+    const btn = () => panels.menu.buttons.find((b) => /^Follow/.test(b.label));
+    btn().fn(); frame(); assert.strictEqual(btn().label, 'Follow: camera'); btn().fn(); frame(); assert(S.follow && S.followStill); assert.strictEqual(btn().label, 'Follow: in place');
+    for (let k = 0; k < 3000; k++) { const f = S.focus, r = ents.world.object3D.rotation.y; frame(16, 1); if (Math.abs(S.focus - f) < 1e-9 && Math.abs(ents.world.object3D.rotation.y - r) < 1e-9) break; }   // let the earlier camera jump settle
+    const focus0 = S.focus, ft0 = S.focusTarget, yaw0 = S.yawTarget, rot0 = ents.world.object3D.rotation.y;
+    RH.followStep([{ i: A, secs: 1000 }]); assert.strictEqual(S.sel, A, 'in place: the new module is selected');
+    assert.strictEqual(S.focusTarget, ft0, 'in place: no elevator move'); assert.strictEqual(S.yawTarget, yaw0, 'in place: the tower is not turned');
+    frame(16, 30); assert(Math.abs(S.focus - focus0) < 1e-9 && Math.abs(ents.world.object3D.rotation.y - rot0) < 1e-9, 'in place: the scene stays still: focus ' + focus0 + ' -> ' + S.focus + ', rot ' + rot0 + ' -> ' + ents.world.object3D.rotation.y + ', targets ' + ft0 + '/' + yaw0);
+    await until(() => S.src.name === S.names[A] && (S.src.tok || S.src.error)); assert(RH.core().i === A, 'its core appears where it is');
+    S.focus += 0; const up = S.follow; assert(up, 'still following');
+    btn().fn(); assert(!S.follow && !S.followStill, 'third press: off');
     global.fetch = realFetch2;
   });
   await t('connection tubes: all connections are lit 3D tubes (hubs beyond the cap: the rest as hair); flow direction, start on the core, nearest first, animation, hiding, shader sanity', async () => {
@@ -337,11 +348,11 @@ load('lib.js'); load('audio.js'); load('app.js');
     ents.panels.object3D.position.set(0, 0, 0); ents.panels.object3D.rotation.y = 0;
     const m0 = S.mini; key('KeyB'); assert.strictEqual(S.mini, !m0, 'B must toggle the miniature'); key('KeyB', true); assert.strictEqual(S.mini, !m0, 'a held key must not retrigger');
     key('KeyM'); assert.strictEqual(S.mini, m0, 'M must still work');
-    const f0 = S.follow; key('KeyX'); assert.strictEqual(S.follow, !f0, 'X must toggle follow live'); key('KeyX'); assert.strictEqual(S.follow, f0);
+    RH.stopFollow(); key('KeyX'); assert(S.follow && !S.followStill, 'X: follow with camera'); key('KeyX'); assert(S.follow && S.followStill, 'X again: follow in place'); key('KeyX'); assert(!S.follow && !S.followStill, 'X a third time: off');
     camWrap.rotation.set(0, 1.0, 0); camWrap.updateMatrixWorld(true); key('KeyR');
     assert(Math.abs(ents.panels.object3D.rotation.y - 1.0) < 1e-6, 'R must put the panels in front of the viewer: ' + ents.panels.object3D.rotation.y);
     camWrap.rotation.set(0, 0, 0); camWrap.updateMatrixWorld(true); key('KeyR');
-    key('KeyA'); key('KeyW'); assert.strictEqual(S.follow, f0, 'WASD must not trigger anything but movement');
+    key('KeyA'); key('KeyW'); assert.strictEqual(S.follow, false, 'WASD must not trigger anything but movement');
   });
   await t('H/Y hides the depth labels together with the panels; zoom changes the field of view within limits', () => {
     const press = (code) => winL.keydown.forEach((f) => f({ code }));
