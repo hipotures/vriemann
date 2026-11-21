@@ -68,7 +68,7 @@
     const m = S.morph; if (!m) return;
     m.t = Math.min(1, m.t + dt / MORPH_SEC); const e = m.t * m.t * (3 - 2 * m.t), P = S.pos, A = m.from, B = m.to;
     for (let k = 0; k < P.length; k++) P[k] = A[k] + (B[k] - A[k]) * e;
-    pts.geometry.attributes.position.needsUpdate = true;
+    pts.geometry.attributes.position.needsUpdate = true; syncSolidCenters();
     if (m.t >= 1) {
       P.set(B); S.layout = m.name; S.morph = null; recomputePacketCentroids();
       if (S.sel >= 0) select(S.sel, true);                              // lines and markers again, at the new positions
@@ -135,10 +135,11 @@
   // ------------------------------------------------------------------ shaders
   const VERT = `
     uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly;
-    attribute float aState, aNs, aDepth, aHi;
-    varying vec3 vCol; varying float vA, vWob, vAng, vBub, vSeed;
+    attribute float aState, aNs, aDepth, aHi, aSolid;
+    varying vec3 vCol; varying float vA;
     vec3 hsv2rgb(vec3 c){ vec4 K=vec4(1.,2./3.,1./3.,3.); vec3 p=abs(fract(c.xxx+K.xyz)*6.-K.www); return c.z*mix(K.xxx,clamp(p-K.xxx,0.,1.),c.y); }
     void main(){
+      if (aSolid > .5) { gl_Position = vec4(2.,2.,2.,1.); gl_PointSize = 0.; vCol = vec3(0.); vA = 0.; return; }   // drawn as a real 3D bubble (SOLID) instead
       vec4 mv = modelViewMatrix*vec4(position,1.);
       float st = aState, size = uSize*uScale, a = 1.; vec3 col;
       if (uMode < .5) {
@@ -162,25 +163,15 @@
         a *= .22;
       }
       if (uHideOpen > .5 && st < .5 && aHi < .5) { gl_Position = vec4(2.,2.,2.,1.); gl_PointSize = 0.; vCol = col; vA = 0.; return; }
-      // soap bubbles: the connected (ancestry / consumers) and the compiling dots tremble and change shape circle -> ellipse -> circle, each with its own phase
-      float hh = fract(sin(dot(position, vec3(12.9898, 78.233, 37.719)))*43758.5453);
-      float bub = ((aHi > .5 && aHi < 2.5) || (st > 3.5 && st < 4.5)) ? 1. : 0.;
-      vBub = bub; vSeed = hh;
-      vWob = 1. + bub*.24*sin(uTime*(1.8 + 2.*hh) + 6.2832*hh);
-      vAng = uTime*(.3 + .4*hh) + 6.2832*hh;
-      size *= 1. + bub*(.10 + .10*sin(uTime*(2.4 + 2.*hh) + 9.*hh));
       gl_Position = projectionMatrix*mv;
       gl_PointSize = clamp(size*projectionMatrix[1][1]*500./max(-mv.z,.05), 2.2, 26.);
       vCol = col; vA = a;
     }`;
   // each point sprite is shaded as a sphere: normal from the position inside the sprite, one light from the upper left
   const FRAG = `
-    varying vec3 vCol; varying float vA, vWob, vAng, vBub, vSeed;
+    varying vec3 vCol; varying float vA;
     void main(){
       vec2 p = (gl_PointCoord - .5)*2.;
-      float ca = cos(vAng), sa = sin(vAng);
-      p = vec2(ca*p.x + sa*p.y, -sa*p.x + ca*p.y);                 // the ellipse turns slowly
-      p /= (vWob >= 1.) ? vec2(1., 1./vWob) : vec2(vWob, 1.);      // semi-axes <= 1: never cut off by the sprite edge
       float r2 = dot(p, p); if (r2 > 1.) discard;
       float z = sqrt(1. - r2);
       vec3 n = vec3(p.x, -p.y, z);                                 // gl_PointCoord.y grows downwards
@@ -191,12 +182,6 @@
       vec3 c = vCol*(.30 + .90*diff + rim) + vec3(spec);
       float edge = 1. - smoothstep(.80, 1., r2);
       float alpha = vA*edge;
-      if (vBub > .5) {                                             // thin-film bubble: see-through centre, bright rim, a hint of iridescence, colour kept
-        float rk = pow(1. - z, 1.6);
-        vec3 irid = .5 + .5*cos(6.2832*(vec3(0., .33, .67) + z*1.3 + vSeed));
-        c = mix(vCol, irid, .30*rk)*(.55 + .60*diff) + vCol*rk*.9 + vec3(spec)*1.4;
-        alpha = clamp(vA*(.30 + .70*rk) + spec*.5, 0., 1.)*edge;
-      }
       gl_FragColor = vec4(c, alpha);
     }`;
   window.__fragSrc = FRAG;   // exposed only so the smoke test can check the shader text
@@ -231,6 +216,49 @@
   ]);
   const PK_HALO_FRAG = `uniform float uGlow; varying vec3 vCol;
     void main(){ vec2 d = gl_PointCoord-.5; float r2 = dot(d,d)*4.; if (r2 > 1.) discard; float gk = exp(-r2*5.); gl_FragColor = vec4(vCol, .55*uGlow*gk); }`;
+
+  // ------------------------------------------------------------------ 3D bubbles: the connected (imports / consumers) and compiling modules
+  // are real instanced ellipsoids, not sprites: they have depth, can be cut by a controller, and wobble in all three axes like soap bubbles.
+  // Up to SOLID.max of them (live ones first, then the connected nearest to the selection); the rest stay plain dots.
+  const SOLID = { max: 6000, detail: 1, minPx: 1.1, wobble: 0.22 };
+  const SOLID_V = `
+    attribute vec3 aCenter; attribute float aKind, aSeed;
+    uniform float uTime, uSize, uScale, uWorldScale, uHiA, uHiS, uMinPx, uWobble;
+    varying vec3 vN, vV, vCol; varying float vA, vSeed;
+    void main(){
+      float h = aSeed;
+      vec3 ax = 1. + uWobble*sin(uTime*(1.6 + 1.6*h) + 6.2832*(h + vec3(0., .33, .67)));   // three semi-axes, each with its own phase
+      ax /= pow(ax.x*ax.y*ax.z, 1./3.);                                                    // volume kept: squeezed one way, bulging another
+      float a1 = uTime*(.25 + .35*h) + 6.2832*h, a2 = uTime*(.18 + .30*fract(h*7.)) + 3.*h; // slow tumble
+      mat3 Ry = mat3(cos(a1), 0., -sin(a1), 0., 1., 0., sin(a1), 0., cos(a1));
+      mat3 Rx = mat3(1., 0., 0., 0., cos(a2), sin(a2), 0., -sin(a2), cos(a2));
+      mat3 R = Ry*Rx;
+      vec3 e = R*(position*ax), nl = R*(normal/ax);                                       // ellipsoid normal = n / axes
+      vec3 col; float s, a = 1.;
+      if (aKind < 1.5) { col = vec3(0., 1., 1.); s = 1.7*uHiS; a = uHiA; }
+      else if (aKind < 2.5) { col = vec3(1., .3, .9); s = 1.7; }
+      else { float p = .5 + .5*sin(uTime*9.); col = mix(vec3(1., .40, .10), vec3(1.), p); s = 2.4 + 1.6*p; }
+      s *= 1.1 + .10*sin(uTime*(2.4 + 2.*h) + 9.*h);
+      vec4 c = modelViewMatrix*vec4(aCenter, 1.);
+      float r = max(.5*uSize*uScale*s, uMinPx*max(-c.z, .05)/(projectionMatrix[1][1]*500.));   // same size as the dot it replaces, never below ~2 px
+      mat3 mvr = mat3(modelViewMatrix)/max(uWorldScale, 1e-4);                             // rotation only: the radius is already in view units
+      vec4 mv = vec4(c.xyz + mvr*e*r, 1.);
+      vN = normalize(mvr*nl); vV = normalize(-mv.xyz); vCol = col; vA = a; vSeed = h;
+      gl_Position = projectionMatrix*mv;
+    }`;
+  const SOLID_F = `
+    varying vec3 vN, vV, vCol; varying float vA, vSeed;
+    void main(){
+      vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n;
+      float ndv = abs(dot(n, normalize(vV)));
+      vec3 Ld = normalize(vec3(-.45, .6, .65));
+      float diff = max(dot(n, Ld), 0.);
+      float spec = pow(max(dot(reflect(-Ld, n), normalize(vV)), 0.), 22.)*.45;
+      float rk = pow(1. - ndv, 1.6);                                                       // thin film: see-through middle, bright rim
+      vec3 irid = .5 + .5*cos(6.2832*(vec3(0., .33, .67) + ndv*1.3 + vSeed));
+      vec3 c = mix(vCol, irid, .30*rk)*(.55 + .60*diff) + vCol*rk*.9 + vec3(spec)*1.4;
+      gl_FragColor = vec4(c, clamp(vA*(.30 + .70*rk) + spec*.5, 0., 1.));
+    }`;
 
   // ------------------------------------------------------------------ canvas panels
   const MONO = '"DejaVu Sans Mono","Noto Sans Mono",Menlo,Consolas,monospace';
@@ -934,6 +962,23 @@
   let rulerInward = null;
   let ptsHalo = null, pkHalo = null;
   let world, panelsEl, camEl, ptsMat, pts, pkPts, pkMat, hoverMark, selMark, lines, linePos, lineCol, ribbons, fibers;
+  let solids = null, solidList = [];
+  /** re-pick the 3D bubbles (selection, live set or view changed); the sprite of each picked module is hidden via aSolid */
+  function rebuildSolids() {
+    if (!solids) return; S.solidsDirty = false;
+    for (const e of solidList) S.solidF[e.i] = 0;
+    const live = []; for (const [i] of S.live) if (S.stF[i] > 3.5) live.push(i);
+    solidList = S.view === 'tower' ? L.pickSolids(S.hiF, S.pos, S.sel, live, SOLID.max) : [];
+    const g = solids.geometry, kind = g.attributes.aKind.array, seed = g.attributes.aSeed.array;
+    solidList.forEach((e, n) => { S.solidF[e.i] = 1; kind[n] = e.kind; seed[n] = ((e.i * 2654435761) >>> 0) / 4294967296; });
+    syncSolidCenters(); g.instanceCount = solidList.length;
+    g.attributes.aKind.needsUpdate = g.attributes.aSeed.needsUpdate = true; pts.geometry.attributes.aSolid.needsUpdate = true;
+  }
+  function syncSolidCenters() {
+    const c = solids.geometry.attributes.aCenter, a = c.array, P = S.pos;
+    solidList.forEach((e, n) => { a[3 * n] = P[3 * e.i]; a[3 * n + 1] = P[3 * e.i + 1]; a[3 * n + 2] = P[3 * e.i + 2]; });
+    c.needsUpdate = true;
+  }
   const hideLinks = () => { lines.geometry.setDrawRange(0, 0); ribbons.geometry.setDrawRange(0, 0); fibers.geometry.setDrawRange(0, 0); for (const c of cores) c.shellMat.uniforms.uDockN.value = 0; };
   const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), tmpM = new THREE.Matrix4();
   const raycaster = new THREE.Raycaster();
@@ -961,6 +1006,17 @@
     const haloMat = new THREE.ShaderMaterial({ vertexShader: HALO_VERT, fragmentShader: HALO_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
       uniforms: { ...ptsMat.uniforms, uGlow: { value: GLOW.strength }, uGlowOpen: { value: 0 }, uHaloScale: { value: GLOW.scale } } });
     ptsHalo = new THREE.Points(g, haloMat); ptsHalo.frustumCulled = false; ptsHalo.renderOrder = 2; world.add(ptsHalo);
+    // 3D bubbles (instanced ellipsoids) for the connected / compiling modules
+    S.solidF = new Float32Array(n);
+    g.setAttribute('aSolid', new THREE.BufferAttribute(S.solidF, 1).setUsage(THREE.DynamicDrawUsage));
+    const ico = new THREE.IcosahedronGeometry(1, SOLID.detail), sg = new THREE.InstancedBufferGeometry();
+    sg.setAttribute('position', ico.attributes.position); sg.setAttribute('normal', ico.attributes.normal);
+    for (const [name, size] of [['aCenter', 3], ['aKind', 1], ['aSeed', 1]]) sg.setAttribute(name, new THREE.InstancedBufferAttribute(new Float32Array(SOLID.max * size), size).setUsage(THREE.DynamicDrawUsage));
+    sg.instanceCount = 0;
+    const pu = ptsMat.uniforms;
+    solids = new THREE.Mesh(sg, new THREE.ShaderMaterial({ vertexShader: SOLID_V, fragmentShader: SOLID_F, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      uniforms: { uTime: pu.uTime, uSize: pu.uSize, uScale: pu.uScale, uHiA: pu.uHiA, uHiS: pu.uHiS, uWorldScale: { value: 1 }, uMinPx: { value: SOLID.minPx }, uWobble: { value: SOLID.wobble } } }));
+    solids.frustumCulled = false; solids.renderOrder = 1; world.add(solids);
 
     // packets cloud
     const np = S.meta.packets;
@@ -1051,7 +1107,7 @@
     ptsMat.uniforms.uHiOnly.value = hiOn && S.closureOnly ? 1 : 0;      // 'only' needs something selected, or everything would vanish
   }
   function setView(v) {
-    S.view = v; pts.visible = v === 'tower'; pkPts.visible = v === 'packets'; applyGlow();
+    S.view = v; pts.visible = solids.visible = v === 'tower'; pkPts.visible = v === 'packets'; applyGlow(); rebuildSolids();
     S.hover = -1; S.hoverPk = -1; hoverMark.visible = false; lines.visible = ribbons.visible = fibers.visible = v === 'tower';
     panels.menu.dirty = panels.info.dirty = true;
   }
@@ -1143,7 +1199,7 @@
   async function pollStatus() {
     try {
       S.status = await jget('/api/status'); S.statusAt = performance.now(); soundLoad(S.status.sys);
-      for (const m of S.status.compiling || []) { S.live.set(m.i, performance.now() + 12000); S.stF[m.i] = 4; S.dirtyState = true; }
+      for (const m of S.status.compiling || []) { if (!S.live.has(m.i)) S.solidsDirty = true; S.live.set(m.i, performance.now() + 12000); S.stF[m.i] = 4; S.dirtyState = true; }
       coreTelemetry(); followStep(S.status.compiling);
       panels.log.dirty = true; panels.menu.dirty = true;
     } catch (e) { /* server restarting */ }
@@ -1155,7 +1211,7 @@
     } catch (e) { /* server restarting */ }
   }
   function liveBuilt(i) {
-    S.live.set(i, performance.now() + 9000); S.stF[i] = 4; S.dirtyState = true;
+    S.live.set(i, performance.now() + 9000); S.stF[i] = 4; S.dirtyState = true; S.solidsDirty = true;
     S.builtNow.add(i);                                       // built in this session (the state poll catches up within 8 s)
   }
   function connectEvents() {
@@ -1190,7 +1246,7 @@
   function firstOfPacket(k) { for (let i = 0; i < S.n; i++) if (S.pk[i] === k) return i; return -1; }
   function clearSel() {
     S.sel = -1; S.selPk = -1; S.hiF.fill(0); pts.geometry.attributes.aHi.needsUpdate = true;
-    selMark.visible = false; coreHide(); hideLinks(); applyUniforms();
+    selMark.visible = false; coreHide(); hideLinks(); applyUniforms(); rebuildSolids();
     S.src.tok = null; S.src.hl = null; S.decls = []; S.hoverSat = -1; S.src.name = ''; S.src.error = ''; S.src.loading = false;
     panels.info.dirty = panels.source.dirty = true; syncSourcePanel();
   }
@@ -1232,13 +1288,13 @@
     lines.geometry.attributes.position.needsUpdate = true; lines.geometry.attributes.color.needsUpdate = true; lines.geometry.setDrawRange(0, nl * 2);
     pts.geometry.attributes.aHi.needsUpdate = true;
     selMark.visible = false; coreShow(i); setDocks(core, S.links === 'fibers' ? pendingDocks : []);
-    applyUniforms(); panels.info.dirty = true; syncSourcePanel();
+    applyUniforms(); rebuildSolids(); panels.info.dirty = true; syncSourcePanel();
     if (!keepSrc) loadSource(i);
   }
   function selectPacket(k) {
     S.selPk = k; S.sel = -1; S.hiF.fill(0);
     for (let i = 0; i < S.n; i++) if (S.pk[i] === k) S.hiF[i] = 3;
-    pts.geometry.attributes.aHi.needsUpdate = true; hideLinks(); selMark.visible = false; coreHide();
+    pts.geometry.attributes.aHi.needsUpdate = true; hideLinks(); selMark.visible = false; coreHide(); rebuildSolids();
     applyUniforms(); panels.info.dirty = true; syncSourcePanel();
   }
   /** Desktop zoom (field of view); in VR the headset decides. */
@@ -1567,8 +1623,10 @@
     // live flashes expire / upload batching
     if (S.live.size && t - S.lastUpload > 250) {
       const now = performance.now();
-      for (const [i, until] of S.live) if (until <= now) { S.live.delete(i); S.stF[i] = 3; S.dirtyState = true; }
+      for (const [i, until] of S.live) if (until <= now) { S.live.delete(i); S.stF[i] = 3; S.dirtyState = true; S.solidsDirty = true; }
     }
+    if (S.solidsDirty && t - (S.lastSolids || 0) > 250) { S.lastSolids = t; rebuildSolids(); }
+    solids.material.uniforms.uWorldScale.value = world.scale.x;
     if (S.dirtyState && t - S.lastUpload > 250) { pts.geometry.attributes.aState.needsUpdate = true; S.dirtyState = false; S.lastUpload = t; }
     // VR hover from the right controller
     if (t - lastHoverT > 120 && !S.hoverSuspended) {
@@ -1605,7 +1663,7 @@
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
     const el = $('loading'); if (el) el.remove();
-    window.RH = { FOV_MIN, FOV_MAX, ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, link, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
+    window.RH = { FOV_MIN, FOV_MAX, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, link, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }
   boot();
 })();

@@ -625,17 +625,36 @@ load('lib.js'); load('audio.js'); load('app.js');
     assert(!/smoothstep\(\s*1\.\s*,\s*\.80/.test(src), 'reversed smoothstep edges are undefined in GLSL');
     assert(/, 4\., 28\.\)/.test(ptsHalo.material.vertexShader), 'halo size cap'); assert(ptsHalo.material.uniforms.uHaloScale.value <= 2.5);
   });
-  await t('bubble dots: elliptical wobble + thin-film rim for connected/compiling dots only, colour kept; GLSL sanity', () => {
-    const src = window.__fragSrc, v = RH.halo().ptsMat.vertexShader;
-    for (const need of ['vWob', 'vAng', 'vBub', 'vSeed', 'irid', 'vCol']) assert(src.includes(need), 'fragment shader lacks ' + need);
-    assert(/\? vec2\(1\., 1\.\/vWob\) : vec2\(vWob, 1\.\)/.test(src), 'ellipse axes must stay <= 1 (else the sprite cuts the dot off)');
-    assert(/mix\(vCol, irid, \.30\*rk\)/.test(src), 'the bubble keeps the dot colour and only tints the rim');
-    assert(/aHi > \.5 && aHi < 2\.5/.test(v) && /st > 3\.5/.test(v), 'only ancestry/consumers/compiling dots become bubbles');
-    for (const [n, sh] of [['frag', src], ['vert', v]]) { for (const m of sh.matchAll(/smoothstep\(\s*([0-9.]+)\s*,\s*([0-9.]+)/g)) assert(parseFloat(m[1]) < parseFloat(m[2]), n + ': reversed smoothstep edges ' + m[0]); assert((sh.match(/\{/g) || []).length === (sh.match(/\}/g) || []).length, n + ': unbalanced braces'); }
+  await t('connected and compiling modules are real 3D bubbles (instanced ellipsoids), their flat dots hidden; GLSL sanity', async () => {
+    const { pts, ptsMat } = RH.halo(), sol = RH.solids(), g = sol.geometry, sum = (a) => a.reduce((x, y) => x + y, 0);
+    setView('tower'); S.closureOn = true; S.live.clear(); for (let k = 0; k < S.n; k++) if (S.stF[k] > 3.5) S.stF[k] = S.st[k];
+    const i = S.depth.indexOf(120); RH.select(i);
+    const list = RH.solidList();
+    assert(g.isInstancedBufferGeometry && g.attributes.normal, 'instanced lit geometry');
+    const zs = g.attributes.position.array.filter((_, k) => k % 3 === 2); assert(Math.max(...zs) - Math.min(...zs) > 1.5, 'the base shape is a solid, not a flat card');
+    assert(list.length > 0 && list.length <= RH.SOLID.max && g.instanceCount === list.length, 'bubbles drawn for the connected modules: ' + list.length);
+    assert.strictEqual(sum(S.solidF), list.length, 'exactly the bubbles are hidden in the dot cloud');
+    for (const [n, e] of list.entries()) {
+      assert.strictEqual(S.solidF[e.i], 1); assert(e.kind === (S.hiF[e.i] < 1.5 ? 1 : 2), 'kind follows import/consumer');
+      for (let c = 0; c < 3; c++) assert.strictEqual(g.attributes.aCenter.array[3 * n + c], S.pos[3 * e.i + c], 'bubble sits on its module');
+    }
+    assert(!list.some((e) => e.i === i), 'the selected module is the core, not a bubble');
+    assert(/aSolid > \.5\) \{ gl_Position = vec4\(2\./.test(ptsMat.vertexShader) && /aSolid/.test(RH.halo().ptsHalo.material.vertexShader), 'dot (and its halo) hidden where a bubble is drawn');
+    assert(sol.material.side === THREE.DoubleSide && sol.material.uniforms.uScale === ptsMat.uniforms.uScale && sol.material.uniforms.uHiA === ptsMat.uniforms.uHiA, 'bubbles follow the dot size / dimming');
+    // a module that starts compiling becomes a bubble too, and leaves the list when its flash ends
+    const j = S.depth.indexOf(7); __es.onmessage({ data: JSON.stringify({ k: 'built', i: j, name: S.names[j], n: 1, N: 2, s: 3 }) });
+    await new Promise((r) => setTimeout(r, 300)); frame();
+    assert(RH.solidList()[0].i === j && RH.solidList()[0].kind === 4 && S.solidF[j] === 1, 'live module first, as kind 4');
+    S.live.set(j, performance.now() - 1); S.lastUpload = 0; await new Promise((r) => setTimeout(r, 300)); frame(); frame();
+    assert(!RH.solidList().some((e) => e.i === j), 'expired live module back to a dot');
+    setView('packets'); assert.strictEqual(g.instanceCount, 0); assert.strictEqual(sum(S.solidF), 0, 'packets view: no bubbles, no hidden dots'); setView('tower');
+    // shader sanity (GLSL is not compiled in node)
+    const v = sol.material.vertexShader, f = sol.material.fragmentShader, src = window.__fragSrc;
+    assert(!/vWob|vBub/.test(src + ptsMat.vertexShader), 'the flat sprite wobble is gone');
+    assert(/ax \/= pow\(ax\.x\*ax\.y\*ax\.z, 1\.\/3\.\)/.test(v) && /normal\/ax/.test(v), 'ellipsoid: volume kept, normals transformed with the inverse axes');
+    for (const [n, sh] of [['frag', f], ['vert', v], ['dots', src], ['dotsv', ptsMat.vertexShader]]) { for (const m of sh.matchAll(/smoothstep\(\s*([0-9.]+)\s*,\s*([0-9.]+)/g)) assert(parseFloat(m[1]) < parseFloat(m[2]), n + ': reversed smoothstep edges ' + m[0]); assert((sh.match(/\{/g) || []).length === (sh.match(/\}/g) || []).length, n + ': unbalanced braces'); assert((sh.match(/\(/g) || []).length === (sh.match(/\)/g) || []).length, n + ': unbalanced parentheses'); }
     const varyings = (s) => [...s.matchAll(/varying\s+(?:float|vec3)\s+([^;]+);/g)].flatMap((m) => m[1].split(',').map((x) => x.trim())).sort();
-    assert.deepStrictEqual(varyings(v), varyings(src), 'vertex and fragment shaders must declare the same varyings');
-    // the halo is derived from the same vertex shader and must keep working
-    assert(/vWob/.test(RH.halo().ptsHalo.material.vertexShader));
+    assert.deepStrictEqual(varyings(v), varyings(f), 'bubble shaders: same varyings'); assert.deepStrictEqual(varyings(ptsMat.vertexShader), varyings(src), 'dot shaders: same varyings');
   });
   await t('module core is a lit, layered sphere (plasma shader + nucleus inside), animated by state/energy, fading with the crossfade', () => {
     setView('tower'); RH.select(S.depth.indexOf(33)); frame(16, 60); const c = RH.core();

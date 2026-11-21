@@ -162,6 +162,28 @@
    * How strongly to draw the highlighted ancestry: the more modules are lit, the dimmer and smaller each one, so the total
    * brightness stays about constant (Main has 175,186 ancestors = the whole graph; at full strength plus additive glow it is a solid wall).
    */
+  /**
+   * Which modules are drawn as real 3D bubbles: every live (compiling / just built) one first, then the connected ones
+   * (hi 1 = imports / ancestry, 2 = consumers) nearest to the selected module, at most `max` in total.
+   * Returns [{ i, kind }] with kind 1 import, 2 consumer, 4 live.
+   */
+  function pickSolids(hi, pos, sel, live, max) {
+    const out = [], taken = new Set();
+    for (const i of live) { if (out.length >= max) return out; if (!taken.has(i)) { taken.add(i); out.push({ i, kind: 4 }); } }
+    const cand = [];
+    if (sel >= 0) {
+      const ax = pos[3 * sel], ay = pos[3 * sel + 1], az = pos[3 * sel + 2];
+      for (let i = 0; i < hi.length; i++) {
+        const h = hi[i]; if (h < 0.5 || h > 2.5 || taken.has(i)) continue;
+        const dx = pos[3 * i] - ax, dy = pos[3 * i + 1] - ay, dz = pos[3 * i + 2] - az;
+        cand.push({ i, kind: h < 1.5 ? 1 : 2, d: dx * dx + dy * dy + dz * dz });
+      }
+      cand.sort((u, v) => u.d - v.d);
+    }
+    for (const c of cand) { if (out.length >= max) break; out.push({ i: c.i, kind: c.kind }); }
+    return out;
+  }
+
   function hiScale(count, target) {
     target = target || 2500; const r = Math.max(1, count) / target;
     if (r <= 1) return { a: 1, s: 1 };
@@ -358,6 +380,6 @@
   const fmt = (x) => String(Math.round(x)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const pct = (a, b) => (b ? (100 * a / b).toFixed(1) : '0.0') + '%';
 
-  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, buildTubes, buildFibers, ZETA_ZEROS, zeroHeights, zeroFlash, nucleusProgress, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
+  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, pickSolids,buildTubes, buildFibers, ZETA_ZEROS, zeroHeights, zeroFlash, nucleusProgress, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.RHLib = api;
 })(typeof self !== 'undefined' ? self : this);

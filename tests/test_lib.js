@@ -282,4 +282,14 @@ t('packetStats + colour helpers', () => {
   assert.strictEqual(tot, n);
   assert.deepStrictEqual(L.hsv(0, 1, 1), [255, 0, 0]); assert.strictEqual(L.fmt(1234567), '1,234,567'); assert.strictEqual(L.pct(1, 4), '25.0%');
 });
+t('pickSolids: live first, then connected nearest to the selection, capped; selection and plain dots excluded', () => {
+  const pos = new Float32Array([0, 0, 0, 5, 0, 0, 1, 0, 0, 2, 0, 0, 3, 0, 0, 9, 0, 0]);
+  const hi = new Float32Array([3, 1, 2, 1, 0, 1]);                  // 0 = selected, 4 = plain dot
+  const all = L.pickSolids(hi, pos, 0, [4], 10);
+  assert.deepStrictEqual(all.map((e) => [e.i, e.kind]), [[4, 4], [2, 2], [3, 1], [1, 1], [5, 1]]);
+  assert.deepStrictEqual(L.pickSolids(hi, pos, 0, [4], 3).map((e) => e.i), [4, 2, 3], 'the cap keeps the live one and the nearest');
+  assert.deepStrictEqual(L.pickSolids(hi, pos, 0, [3], 10).filter((e) => e.i === 3).map((e) => e.kind), [4], 'a live connected module appears once, as live');
+  assert.deepStrictEqual(L.pickSolids(hi, pos, -1, [], 10), [], 'no selection: no connected bubbles');
+  assert.strictEqual(L.pickSolids(hi, pos, 0, [1, 2, 3], 2).length, 2, 'the cap also holds for live ones');
+});
 console.log(ok + ' tests passed');
