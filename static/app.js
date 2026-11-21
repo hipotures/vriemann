@@ -220,7 +220,7 @@
   // ------------------------------------------------------------------ 3D bubbles: the connected (imports / consumers) and compiling modules
   // are real instanced ellipsoids, not sprites: they have depth, can be cut by a controller, and wobble in all three axes like soap bubbles.
   // Up to SOLID.max of them (live ones first, then the connected nearest to the selection); the rest stay plain dots.
-  const SOLID = { max: 6000, detail: 1, minPx: 1.1, wobble: 0.22, tempo: 1.0 };      // tempo: 1 = shape periods ~5-16 s, compiling beat ~2-3.5 s
+  const SOLID = { max: 4000, segs: 24, rings: 16, minPx: 1.1, wobble: 0.22, tempo: 1.0 };      // tempo: 1 = shape periods ~5-16 s, compiling beat ~2-3.5 s
   const SOLID_V = `
     attribute vec3 aCenter; attribute float aKind, aSeed;
     uniform float uTime, uSize, uScale, uWorldScale, uHiA, uHiS, uMinPx, uWobble, uTempo;
@@ -1012,8 +1012,9 @@
     // 3D bubbles (instanced ellipsoids) for the connected / compiling modules
     S.solidF = new Float32Array(n);
     g.setAttribute('aSolid', new THREE.BufferAttribute(S.solidF, 1).setUsage(THREE.DynamicDrawUsage));
-    const ico = new THREE.IcosahedronGeometry(1, SOLID.detail), sg = new THREE.InstancedBufferGeometry();
-    sg.setAttribute('position', ico.attributes.position); sg.setAttribute('normal', ico.attributes.normal);
+    // a smooth indexed UV sphere (24x16: ~425 vertices); an 80-face icosahedron showed a polygonal outline up close
+    const ball = new THREE.SphereGeometry(1, SOLID.segs, SOLID.rings), sg = new THREE.InstancedBufferGeometry();
+    sg.setIndex(ball.index); sg.setAttribute('position', ball.attributes.position); sg.setAttribute('normal', ball.attributes.normal);
     for (const [name, size] of [['aCenter', 3], ['aKind', 1], ['aSeed', 1]]) sg.setAttribute(name, new THREE.InstancedBufferAttribute(new Float32Array(SOLID.max * size), size).setUsage(THREE.DynamicDrawUsage));
     sg.instanceCount = 0;
     const pu = ptsMat.uniforms;

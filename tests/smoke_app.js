@@ -641,6 +641,7 @@ load('lib.js'); load('audio.js'); load('app.js');
     assert(!list.some((e) => e.i === i), 'the selected module is the core, not a bubble');
     { const sd = Array.from(g.attributes.aSeed.array.slice(0, list.length)); assert(new Set(sd.map((x) => x.toFixed(3))).size > Math.min(500, 0.5 * sd.length), 'every bubble needs its own phase/tempo'); }
     assert(/aSolid > \.5\) \{ gl_Position = vec4\(2\./.test(ptsMat.vertexShader) && /aSolid/.test(RH.halo().ptsHalo.material.vertexShader), 'dot (and its halo) hidden where a bubble is drawn');
+    assert(g.index && g.attributes.position.count >= 300, 'smooth sphere, not a coarse polyhedron: ' + g.attributes.position.count + ' vertices');
     assert(sol.material.side === THREE.DoubleSide && sol.material.uniforms.uScale === ptsMat.uniforms.uScale && sol.material.uniforms.uHiA === ptsMat.uniforms.uHiA, 'bubbles follow the dot size / dimming');
     // a module that starts compiling becomes a bubble too, and leaves the list when its flash ends
     const j = S.depth.indexOf(7); __es.onmessage({ data: JSON.stringify({ k: 'built', i: j, name: S.names[j], n: 1, N: 2, s: 3 }) });

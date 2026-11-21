@@ -77,8 +77,8 @@ Colours: grey = open, blue = assigned to someone, green = built (by others), gol
 Selected module: the whole chain of its imports (cyan), direct consumers (magenta), Lean code with highlighting (`sorry`/`axiom` in red).
 Every module is normally a dot shaded like a ball (a camera-facing sprite: cheap, but flat if you put a controller through it). The **connected modules** (imports / consumers of the
 selection) and the **compiling** ones are instead real 3D **soap bubbles**: instanced ellipsoids with a see-through middle and an iridescent rim, which slowly tumble and squeeze in all
-three axes (volume kept). They have real depth, so a controller cuts them like solid objects. Up to `SOLID.max` = 6,000 at once (compiling ones first, then the connected nearest to the
-selection); beyond that the rest stay plain dots. Each bubble has its own tempo and phase (shape periods ~5–16 s, compiling ones beat every ~2–3.5 s), so they never pulse in step. Tune them with `SOLID` in `app.js` (`max`, `detail`, `minPx`, `wobble`, `tempo`).
+three axes (volume kept). They have real depth, so a controller cuts them like solid objects. Smooth spheres (24×16), up to `SOLID.max` = 4,000 at once (compiling ones first, then the connected nearest to the
+selection); beyond that the rest stay plain dots. Each bubble has its own tempo and phase (shape periods ~5–16 s, compiling ones beat every ~2–3.5 s), so they never pulse in step. Tune them with `SOLID` in `app.js` (`max`, `segs`, `rings`, `minPx`, `wobble`, `tempo`).
 The "Packets" view = 2,858 packets as spheres (colour = % built). "Follow live" (X) cycles off → **camera** (selects the module that has been compiling the longest and takes you there: elevator + turning the tower) → **in place** (the scene stays still, only the selection moves: each new module gets its core, links and code where it is) → off. A manual selection turns follow off.
 
 ## Tests
