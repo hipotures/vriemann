@@ -3,6 +3,18 @@
 A visualization of the Lean verification of Alpöge's RH proof ([alpoge-rh-replay](https://github.com/rohanarun/alpoge-rh-replay)):
 175,187 modules in 3D, height = import depth (Main on top): a tower of rings (the default), a double / ×4 / ×8 helix, a miniature on a table, or the 2,858 packets as spheres. Everything is read locally – no GitHub requests.
 
+<p align="center"><a href="docs/gallery/interface-1.webp"><img src="docs/gallery/interface-1.webp" width="100%" alt="VRiemann: menu, live build log and the Lean source of the selected module, floating in the proof"></a></p>
+
+<p align="center"><i>The real Lean source of every module is readable in the scene (right), next to the live build log of the replay (middle).</i></p>
+
+<p align="center">
+<a href="docs/GALLERY.md#a-module-up-close"><img src="docs/gallery/module-2.webp" height="200" alt="A module up close"></a>
+<a href="docs/GALLERY.md#the-eye-of-riemann"><img src="docs/gallery/eye.webp" height="200" alt="The Eye of Riemann"></a>
+<a href="docs/GALLERY.md#the-proof-as-a-helix"><img src="docs/gallery/helix-2.webp" height="200" alt="The proof as a helix"></a>
+</p>
+
+<p align="center"><b><a href="docs/GALLERY.md">More in the gallery →</a></b></p>
+
 ## Quick start
 Needs only Python 3 (standard library, no packages; tested with 3.14) and a modern browser. Works offline after the clone.
 
@@ -125,6 +137,13 @@ The passive dots (open / assigned / built modules not connected to the selection
 | N | hover marker |
 
 Labels keep the same small size on screen while zooming. Only a few of each are labelled (the 24 bubbles nearest to you, 10 satellites, 6 import and 4 consumer links, 3 zeros); tune it with `DEBUG` in `app.js`.
+
+## Gallery
+Screenshots live in `docs/gallery/` as small WebP files, described in `docs/gallery/gallery.json`; `docs/GALLERY.md` is generated from it.
+Add new ones with (needs Pillow; panoramas are stacked automatically, other shots of one group sit side by side):
+
+    python3 tools/gallery.py add "Title" "One caption for the group" shot1.png [shot2.png …] [--slug name]
+    python3 tools/gallery.py build      # after editing gallery.json by hand
 
 ## Tests
     node tests/test_lib.js                                   # logic on the real data

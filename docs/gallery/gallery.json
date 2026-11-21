@@ -1,0 +1,82 @@
+{
+  "hero": "interface-1.webp",
+  "groups": [
+    {
+      "slug": "interface",
+      "title": "The whole interface",
+      "caption": "The menu with the build progress (left), the live build log of our machine (middle), and the Lean source of the selected module (right), with the module itself and its import fibres floating in the tower. Everything updates while the proof is being replayed.",
+      "images": [
+        {
+          "file": "interface-1.webp",
+          "size": [
+            1800,
+            872
+          ]
+        },
+        {
+          "file": "interface-2.webp",
+          "size": [
+            1800,
+            643
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "module",
+      "title": "A module up close",
+      "caption": "The selected module: an orange membrane, a sphere carrying its Lean code, a nucleus that grows with the estimated compile progress, and blue satellites for its theorems and definitions. Cyan fibres bring in its imports (with comets flowing into the core); connected modules are soap bubbles.",
+      "images": [
+        {
+          "file": "module-1.webp",
+          "size": [
+            1800,
+            990
+          ]
+        },
+        {
+          "file": "module-2.webp",
+          "size": [
+            1800,
+            1307
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "eye",
+      "title": "The Eye of Riemann",
+      "caption": "Looking straight down the axis of the tower: 175,187 modules, ring after ring, form an eye around the empty centre.",
+      "images": [
+        {
+          "file": "eye.webp",
+          "size": [
+            1800,
+            1012
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "helix",
+      "title": "The proof as a helix",
+      "caption": "The helix layout: height is import depth, each strand a namespace. Built modules are gold, the connections of the selection cyan; above the tower, Main (the final theorem) with the critical line and the first zeros of zeta.",
+      "images": [
+        {
+          "file": "helix-1.webp",
+          "size": [
+            1094,
+            1800
+          ]
+        },
+        {
+          "file": "helix-2.webp",
+          "size": [
+            1216,
+            1800
+          ]
+        }
+      ]
+    }
+  ]
+}
