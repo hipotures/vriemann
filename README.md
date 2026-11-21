@@ -18,6 +18,8 @@ Desktop: drag = look around, WASD = move, Q/E = elevator (depth), click = select
 VR (Touch controllers): trigger = select / button, left stick ▲▼ = elevator, right stick ◀▶ = rotate the world, right stick ▲▼ over the code = scroll,
 A = put the panels in front of me, B = tower ⇄ miniature on a table, X = follow live, Y = hide/show the panels.
 
+In the headset the menu leaves out the keyboard help (only warnings such as blocked sound remain); on the desktop the key hint sits on a dark backing.
+
 ## Recording, miniature, hands
 - **H or Y** (keyboard) / **Y** (left controller) – hides/shows the whole interface: panels, hint and VR button. For recordings.
 - **Miniature** (B / M): the tower on a table. **Grip** on a controller or a **pinch in empty space** with a hand grabs it to move/rotate it;
@@ -31,7 +33,7 @@ A = put the panels in front of me, B = tower ⇄ miniature on a table, X = follo
   estimates the expected time from the file length with a power law fitted to every module we have built (90th percentile: ~94% finish before it runs out). The nucleus grows
   from a seed to full size, **breathes slowly when a module runs past its estimate**, flashes once when the module is built, and stays full for built modules. **Declarations from the code** orbit around it (theorem/lemma/def/instance/axiom; size = length, `axiom` in red) –
   **clicking a satellite scrolls the code to that declaration** and highlights it.
-  Changing the selected module is a **smooth hand-over**: the new sphere appears in ~0.4 s, the old one lingers ~1.2 s, fading and collapsing into its centre, and a soft arc with a travelling point (~1.1 s) "hands over" attention, slow enough for the camera to follow (`FADE_SEC`, `OUT_SEC`, `LINK_SEC`, `LINK_RUN` in `app.js`).
+  Changing the selected module is a **smooth hand-over**: the new sphere appears in ~0.4 s, the old one lingers ~1.2 s, fading and collapsing into its centre, and a soft arc with a travelling point (~1.1 s) "hands over" attention, slow enough for the camera to follow. Every jump leaves its own arc that fades over ~6 s, so quick jumps leave a fading web of the path (up to 16 arcs; `FADE_SEC`, `OUT_SEC`, `LINK_SEC`, `LINK_RUN`, `LINK_N` in `app.js`).
 - **Live build** panel: machine CPU and RAM bars plus the number of `lean` processes, so you can see that work is happening.
 
 ## Sound (off by default)

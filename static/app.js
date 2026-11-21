@@ -365,12 +365,18 @@
     p.button(c, 670, y + 168, 190, 64, ['Glow: off', 'Glow: on', 'Glow: all'][S.glow], cycleGlow, S.glow > 0);
     p.button(c, 40, y + 246, 190, 64, S.debug ? 'Debug: on' : 'Debug: off', toggleDebug, !!S.debug);
     y += 78;
+    const vr = inVR();                                                    // in the headset there is no keyboard: no help lines, only warnings
+    if (vr) {
+      if (blocked) text(c, `Sound is BLOCKED by the browser (audio ${snd.ctxState}): pull the trigger once`, 40, y + 266, { size: 20, color: '#ffb454' });
+      if (S.glowAuto) text(c, 'Glow lowered automatically: the frame rate was too low', 40, y + (blocked ? 292 : 266), { size: 20, color: '#ffb454' });
+    } else {
     text(c, 'Hide open: hide dots that are not built yet', 40, y + 266, { size: 20, color: '#7f8fb3' });
     text(c, 'Closure (C): off / dim the rest / only = hide everything but the selection + its imports', 40, y + 292, { size: 20, color: '#7f8fb3' });
     text(c, 'Miniature: grip / pinch-drag moves it · stick ▲▼ = size', 40, y + 318, { size: 20, color: '#7f8fb3' });
     text(c, blocked ? `Sound is BLOCKED by the browser (audio ${snd.ctxState}): press any key / trigger / click once` : `Sound (N): bed follows CPU/RAM, a note per built module, a chord per packet · volume ${Math.round(snd.volume * 100)}%`, 40, y + 344, { size: 20, color: blocked ? '#ffb454' : '#7f8fb3' });
     text(c, S.glowAuto ? 'Glow lowered automatically: the frame rate was too low (G to raise)' : 'Glow (G): soft halo on built / active dots · "all" adds a faint one to open dots', 40, y + 370, { size: 20, color: S.glowAuto ? '#ffb454' : '#7f8fb3' });
-    y += 426;
+    }
+    y += vr ? 272 + (blocked ? 26 : 0) + (S.glowAuto ? 26 : 0) : 426;
     // legend
     if (S.debug) {
       text(c, 'DEBUG LABELS (I)', 40, y, { size: 20, color: '#7283a6', weight: 700 });
@@ -824,34 +830,42 @@
   }
   // the new module appears in FADE_SEC; the one we leave lingers OUT_SEC, fading and collapsing into its centre, so the camera can follow
   // the hand-over arc (LINK_SEC long, its bright point travelling for LINK_RUN) from the old module to the new one
-  const FADE_SEC = 0.4, OUT_SEC = 1.2, LINK_SEC = 1.6, LINK_RUN = 1.1;
+  // every jump leaves its own arc that fades slowly (LINK_SEC), so quick jumps leave a fading web of the path; at most LINK_N arcs at once
+  const FADE_SEC = 0.4, OUT_SEC = 1.2, LINK_SEC = 6.0, LINK_RUN = 1.1, LINK_N = 16;
   const cores = [];                          // two slots: one fades in while the other fades out
-  const link = { t: 99, a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), line: null, dot: null };
-  function makeLink() {
+  const links = []; let link = null;                                         // link = the most recent arc
+  function makeLinkOne() {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(25 * 3), 3));
-    link.line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0, depthWrite: false }));
-    link.dot = new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
-    for (const o of [link.line, link.dot]) { o.frustumCulled = false; o.visible = false; }
-    return [link.line, link.dot];
+    const L = { t: 99, a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3() };
+    L.line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    L.dot = new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
+    for (const o of [L.line, L.dot]) { o.frustumCulled = false; o.visible = false; }
+    return L;
+  }
+  function makeLink() {
+    for (let k = 0; k < LINK_N; k++) links.push(makeLinkOne());
+    link = links[0]; return links.flatMap((L) => [L.line, L.dot]);
   }
   const bez = (a, c, b, q, out) => out.set((1 - q) * (1 - q) * a.x + 2 * (1 - q) * q * c.x + q * q * b.x, (1 - q) * (1 - q) * a.y + 2 * (1 - q) * q * c.y + q * q * b.y, (1 - q) * (1 - q) * a.z + 2 * (1 - q) * q * c.z + q * q * b.z);
-  /** a soft arc from the module we leave to the one we arrive at, bowed away from the tower axis so it hugs the wall */
+  /** a soft arc from the module we leave to the one we arrive at, bowed away from the tower axis so it hugs the wall; reuses the oldest arc */
   function startLink(a, b) {
     const dist = a.distanceTo(b); if (dist < 0.05) return;
-    link.a.copy(a); link.b.copy(b); link.c.copy(a).add(b).multiplyScalar(0.5);
-    const out = new THREE.Vector3(link.c.x, 0, link.c.z); if (out.lengthSq() > 1e-9) out.normalize(); else out.set(1, 0, 0);
-    link.c.addScaledVector(out, Math.min(1.5, 0.25 * dist));
-    const pos = link.line.geometry.attributes.position, v = new THREE.Vector3();
-    for (let k = 0; k <= 24; k++) { bez(link.a, link.c, link.b, k / 24, v); pos.setXYZ(k, v.x, v.y, v.z); } pos.needsUpdate = true;
-    link.t = 0;
+    const L = links.reduce((m, x) => (x.t > m.t ? x : m), links[0]);
+    L.a.copy(a); L.b.copy(b); L.c.copy(a).add(b).multiplyScalar(0.5);
+    const out = new THREE.Vector3(L.c.x, 0, L.c.z); if (out.lengthSq() > 1e-9) out.normalize(); else out.set(1, 0, 0);
+    L.c.addScaledVector(out, Math.min(1.5, 0.25 * dist));
+    const pos = L.line.geometry.attributes.position, v = new THREE.Vector3();
+    for (let k = 0; k <= 24; k++) { bez(L.a, L.c, L.b, k / 24, v); pos.setXYZ(k, v.x, v.y, v.z); } pos.needsUpdate = true;
+    L.t = 0; link = L;
   }
   function linkTick(dt) {
-    if (!link.line) return;
-    if (link.t >= LINK_SEC || S.view !== 'tower') { link.line.visible = link.dot.visible = false; if (link.t < LINK_SEC) link.t = LINK_SEC; return; }
-    link.t += dt; const u = Math.min(1, link.t / LINK_SEC), run = Math.min(1, link.t / LINK_RUN), e = run * run * (3 - 2 * run);
-    link.line.visible = true; link.line.material.opacity = 0.4 * (1 - u) * (1 - u);
-    link.dot.visible = run < 1 || u < 1; bez(link.a, link.c, link.b, e, link.dot.position);
-    link.dot.material.opacity = 0.9 * Math.min(1, 4 * (1 - u));
+    for (const L of links) {
+      if (L.t >= LINK_SEC || S.view !== 'tower') { L.line.visible = L.dot.visible = false; if (L.t < LINK_SEC) L.t = LINK_SEC; continue; }
+      L.t += dt; const u = Math.min(1, L.t / LINK_SEC), run = Math.min(1, L.t / LINK_RUN), e = run * run * (3 - 2 * run);
+      L.line.visible = true; L.line.material.opacity = 0.45 * Math.pow(1 - u, 1.5);           // slow fade: the path stays readable for a few seconds
+      const dotEnd = LINK_RUN + 0.4; L.dot.visible = L.t < dotEnd; bez(L.a, L.c, L.b, e, L.dot.position);
+      L.dot.material.opacity = 0.9 * Math.min(1, (dotEnd - L.t) / 0.4);                      // the point arrives, then fades in 0.4 s
+    }
   }
   function coreShow(i) {
     if (core && core.target === 1 && core.i === i) { core.decls = S.decls; coreSetDecls(core); coreTelemetry(); return; }   // same module again (closure toggled ...)
@@ -1014,6 +1028,7 @@
   }
   /** label size: the same on screen in the miniature (world scale) and while zooming (a narrower view would magnify it) */
   const dbgScale = () => DEBUG.size * Math.tan((S.fov || 80) * Math.PI / 360) / Math.tan(40 * Math.PI / 180) / Math.max(world.scale.x, 1e-4);
+  const inVR = () => { const sc = document.querySelector('a-scene'); return !!(sc && sc.is && sc.is('vr-mode')); };
   function toggleDebug() { S.debug = !S.debug; S.dbgPick = 0; if (dbgGroup) dbgGroup.visible = S.debug; if (panels.menu) panels.menu.dirty = true; }
   /** the labels of this frame: [{ letter, p: Vector3 in world-local coordinates }] */
   function debugLabels() {
@@ -1039,7 +1054,7 @@
       if (kind === 0 ? ni++ >= DEBUG.imp : nc++ >= DEBUG.con) return; const v = k * per + mid; add(kind === 0 ? 'H' : 'I', V(pa[3 * v], pa[3 * v + 1], pa[3 * v + 2]));
     });
     for (let k = 0; k < Math.min(DEBUG.hair, lines.geometry.drawRange.count / 2); k++) { const o = k * 6; add('J', V((linePos[o] + linePos[o + 3]) / 2, (linePos[o + 1] + linePos[o + 4]) / 2, (linePos[o + 2] + linePos[o + 5]) / 2)); }
-    if (link.dot && link.dot.visible) add('K', link.dot.position.clone());
+    for (const Lk of links) if (Lk.line.visible) add('K', Lk.dot.visible ? Lk.dot.position.clone() : Lk.line.geometry.attributes.position.array.slice(36, 39).reduce((v, x, q) => (v.setComponent(q, x), v), new THREE.Vector3()));
     if (beacon && beacon.group.visible) {
       const b = beacon.group.position; add('L', V(b.x + 0.25, b.y + 0.25, b.z));
       L.zeroHeights(L.ZETA_ZEROS).slice(0, DEBUG.zeros).forEach((h) => add('M', V(b.x + 0.06, b.y + ZERO.y0 + h * ZERO.span, b.z)));
@@ -1601,6 +1616,7 @@
   }
 
   function wireInput(scene) {
+    for (const ev of ['enter-vr', 'exit-vr']) scene.addEventListener(ev, () => { if (panels.menu) panels.menu.dirty = true; });   // the menu differs in the headset
     const rc = $('rc'), lc = $('lc');
     for (const el of [rc, lc]) {
       const side = el === rc ? 'right' : 'left';
@@ -1744,7 +1760,7 @@
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
     const el = $('loading'); if (el) el.remove();
-    window.RH = { FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, link, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
+    window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }
   boot();
 })();

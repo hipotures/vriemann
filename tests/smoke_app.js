@@ -701,7 +701,19 @@ load('lib.js'); load('audio.js'); load('app.js');
     frame(16, 25);                                                    // 1.2 s
     assert(L0.dot.position.distanceTo(neu.group.position) < 0.02, 'the arc point arrives at the new module');
     frame(16, 10); assert(!old.group.visible, 'gone after OUT_SEC');
-    frame(16, 30); assert(!L0.line.visible, 'arc gone after LINK_SEC');
+    frame(16, 15); assert(L0.line.visible && !L0.dot.visible, 'the point is gone, the arc itself still fades');
+    // quick jumps leave a web: every arc fades on its own, a new jump does not cancel the previous ones
+    const jumps = [60, 80, 100].map((d) => S.depth.indexOf(d)); for (const j of jumps) { RH.select(j); frame(16, 20); }
+    const web = RH.links().filter((x) => x.line.visible); assert(web.length >= 4, 'a fading web of arcs: ' + web.length);
+    const ops = web.map((x) => x.line.material.opacity); assert(Math.max(...ops) > Math.min(...ops), 'older arcs are fainter');
+    frame(100, 70); assert(RH.links().every((x) => !x.line.visible), 'all arcs gone after LINK_SEC');
+  });
+  await t('menu: keyboard help lines on the desktop only (none in the headset, warnings kept); the desktop key hint has a dark backing', () => {
+    const { panels } = RH, painted = () => { for (const k in panels) panels[k].dirty = false; drawn.length = 0; panels.menu.dirty = true; frame(); return drawn.join('\n'); };
+    vrMode = false; assert(/Closure \(C\)/.test(painted()), 'desktop shows the help lines');
+    vrMode = true; const v = painted(); assert(!/\((C|N|G)\)/.test(v) && !/Hide open: hide/.test(v), 'no keyboard help in VR');
+    assert(/LEGEND|DEBUG LABELS|NAMESPACES|DEPTH/.test(v), 'the legend is still there in VR'); vrMode = false; panels.menu.dirty = true; frame();
+    const html = require('fs').readFileSync(__dirname + '/../static/index.html', 'utf8'); assert(/#hud\{[^}]*background:rgba\(0,0,0,\.8/.test(html), 'dark backing behind the key hint');
   });
   await t('module core is a lit, layered sphere (plasma shader + nucleus inside), animated by state/energy, fading with the crossfade', () => {
     setView('tower'); RH.select(S.depth.indexOf(33)); frame(16, 60); const c = RH.core();
@@ -745,7 +757,7 @@ load('lib.js'); load('audio.js'); load('app.js');
     for (let k = 0; k < 40; k++) { frame(16, 1); maxStep = Math.max(maxStep, Math.abs(first.fade - prevOld), Math.abs(second.fade - prevNew)); assert(first.fade <= prevOld + 1e-12 && second.fade >= prevNew - 1e-12 && first.fade >= 0 && second.fade <= 1); prevOld = first.fade; prevNew = second.fade; }
     assert(maxStep <= 16 / 1000 / 0.4 + 1e-9, 'a fade step was bigger than allowed: ' + maxStep);
     assert(first.group.visible && second.fade === 1, 'new fully shown at ~0.85 s, the old one still collapsing'); frame(16, 30); assert(!first.group.visible, 'old gone after OUT_SEC');
-    frame(16, 30); assert(!RH.link.line.visible && !RH.link.dot.visible, 'the arc must disappear (LINK_SEC)');
+    frame(100, 65); assert(!RH.link.line.visible && !RH.link.dot.visible, 'the arc must disappear (LINK_SEC)');
     // the same module selected again (e.g. closure toggled) must not restart anything
     const slot = RH.core(); RH.select(i2, true); assert.strictEqual(RH.core(), slot); assert.strictEqual(slot.fade, 1); assert.strictEqual(RH.cores().filter((x) => x.target === 1).length, 1);
   });
