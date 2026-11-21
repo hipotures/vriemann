@@ -19,13 +19,14 @@ from phase import decide as decide_phase
 HOME = Path.home()
 ap = argparse.ArgumentParser()
 ap.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to reach it from the headset")
-ap.add_argument("--port", type=int, default=8443)
+ap.add_argument("--port", type=int, default=None, help="default: 8443 with --cert/--key (HTTPS), else 8080 (HTTP)")
 ap.add_argument("--cert"); ap.add_argument("--key")
 ap.add_argument("--repo", default=str(HOME / "DEV/alpoge-rh-replay"))
 ap.add_argument("--vol", default=str(HOME / "rh-replay-vol"))
 ap.add_argument("--receipts", default=str(HOME / "rh-receipts"))
 ap.add_argument("--packet-log", default=str(HOME / "rh-tools/packet.log"))
 args = ap.parse_args()
+if args.port is None: args.port = 8443 if args.cert and args.key else 8080
 REPO, VOL, RECEIPTS, PACKET_LOG = Path(args.repo), Path(args.vol), Path(args.receipts), Path(args.packet_log)
 SRC_ROOT = (VOL / "lean" / "src").resolve()
 

@@ -3,14 +3,31 @@
 A visualization of the Lean verification of Alpöge's RH proof ([alpoge-rh-replay](https://github.com/rohanarun/alpoge-rh-replay)):
 175,187 modules as a "tower" (Y axis = import depth, each ring = the modules of one depth, sorted by name). Everything is read locally – no GitHub requests.
 
-## Running
-    python3 build_graph.py            # once (or after the index changes) – writes the 3D layout to data/
-    python3 server.py --host <LAN-IP> --port 8080   # plain HTTP behind a reverse proxy that terminates TLS
-    python3 server.py --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # HTTPS for headsets (WebXR requires HTTPS)
+## Quick start
+Needs only Python 3 (standard library, no packages; tested with 3.14) and a modern browser. Works offline after the clone.
 
-The server reads: `~/DEV/alpoge-rh-replay/tracker` (index, completed.tsv), `~/rh-replay-vol/lean/src` (Lean sources),
-`~/rh-receipts/*/build.log` + `receipt.json` (our live builds), `~/rh-tools/packet.log` (build loop status). Paths: `--repo --vol --receipts --packet-log`.
-A-Frame 1.7.0 (three.js r173) is vendored in `vendor/` – no CDN.
+    git clone https://github.com/rohanarun/alpoge-rh-replay ~/DEV/alpoge-rh-replay   # the module index the tower is built from
+    git clone https://github.com/hipotures/vriemann ~/DEV/vriemann
+    cd ~/DEV/vriemann
+    python3 build_graph.py      # once (and after the index changes): writes the 3D layouts to data/ (a few seconds)
+    python3 server.py           # then open http://127.0.0.1:8080/ in the browser
+
+Cloned the replay repo somewhere else? Pass `--repo <path>` to both commands.
+
+**Optional live data.** Without anything else you see the whole tower with the public build status from the index. These extras light up more panels:
+
+| Path (option) | What it adds |
+|---|---|
+| `~/rh-replay-vol/lean/src` (`--vol`) | the Lean source code on the code sphere and in the source panel (a volume prepared with `./verify.sh <dir> --prepare-only` from the replay repo) |
+| `~/rh-receipts/*/build.log`, `receipt.json` (`--receipts`) | modules you built yourself (gold) and the live build log |
+| `~/rh-tools/packet.log` (`--packet-log`) | the state of a build loop (claiming, building, uploading) in the menu |
+
+**Other devices and VR headsets.** `python3 server.py --host 0.0.0.0` makes it reachable on your network (http://<your-ip>:8080/). WebXR (the VR button) needs HTTPS:
+either put the server behind a reverse proxy that terminates TLS, or give it a certificate directly:
+
+    python3 server.py --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # https://<host>:8443/
+
+A-Frame 1.7.0 (three.js r173) is vendored in `vendor/`, so no CDN is used. The server never contacts GitHub.
 
 ## Controls
 Desktop: drag = look around, WASD = move, Q/E = elevator (depth), click = select / press a button, wheel over the code = scroll (in the miniature: size),
