@@ -271,6 +271,13 @@
     return dt >= 0 ? Math.exp(-dt / decay) : 0;
   }
 
+  /** Nucleus size 0..1 = estimated progress of the module: compiling -> elapsed / expected (the server's estimate from the module's
+   *  length and our build history), capped at 1; built (state 2/3) -> 1; otherwise 0 (just a seed). */
+  function nucleusProgress(tele, state, sinceStatus) {
+    if (tele) { const est = tele.est > 0 ? tele.est : 60; return Math.max(0, Math.min(1, ((tele.secs || 0) + Math.max(0, sinceStatus || 0)) / est)); }
+    return state === 2 || state === 3 ? 1 : 0;
+  }
+
   /** angle wrapped to (-PI, PI] */
   const wrapPi = (a) => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
 
@@ -351,6 +358,6 @@
   const fmt = (x) => String(Math.round(x)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const pct = (a, b) => (b ? (100 * a / b).toFixed(1) : '0.0') + '%';
 
-  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, buildTubes, buildFibers, ZETA_ZEROS, zeroHeights, zeroFlash, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
+  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, buildTubes, buildFibers, ZETA_ZEROS, zeroHeights, zeroFlash, nucleusProgress, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.RHLib = api;
 })(typeof self !== 'undefined' ? self : this);

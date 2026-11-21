@@ -267,6 +267,14 @@ t('critical line: 30 real zeta zeros, denser upwards; the blink runs bottom -> t
   // a blink dies out: shortly after, the zero is dark again until the next cycle; and the whole line repeats every cycle
   for (const h of [0, 0.5, 1]) { const t0 = sweep * Math.sqrt(h); assert(f(h, t0 + 1.5) < 0.01, 'blink decays'); assert(f(h, t0 - 0.01) < 1e-3, 'dark before'); assert(Math.abs(f(h, t0 + 0.1) - f(h, t0 + 0.1 + cycle)) < 1e-9, 'periodic'); }
 });
+t('nucleusProgress: elapsed / expected while compiling (capped), full when built, a seed otherwise', () => {
+  const P = L.nucleusProgress;
+  assert.strictEqual(P({ secs: 5, est: 10 }, 4, 0), 0.5); assert.strictEqual(P({ secs: 5, est: 10 }, 4, 2.5), 0.75, 'advances between status polls');
+  assert.strictEqual(P({ secs: 50, est: 10 }, 4, 0), 1, 'capped at 1 past the estimate'); assert.strictEqual(P({ secs: 0, est: 10 }, 4, -3), 0, 'never negative');
+  assert.strictEqual(P({ secs: 30 }, 4, 0), 0.5, 'no estimate: assume 60 s'); assert.strictEqual(P({ secs: 3, est: 0 }, 4, 0), 0.05);
+  assert.strictEqual(P(null, 2, 0), 1); assert.strictEqual(P(null, 3, 0), 1, 'built (by others / by us): full');
+  assert.strictEqual(P(null, 0, 0), 0); assert.strictEqual(P(null, 1, 0), 0, 'open / assigned: just a seed');
+});
 t('packetStats + colour helpers', () => {
   const st = new Uint8Array(n).map((_, i) => i % 4); const pk = new Uint16Array(fs.readFileSync(path.join(D, 'packet.u16')).buffer.slice(0));
   const ps = L.packetStats(n, pk, st, meta.packets);

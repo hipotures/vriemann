@@ -9,7 +9,7 @@
 
   // ------------------------------------------------------------------ state
   const S = {
-    layout: 'tower', links: 'fibers', layoutTarget: 'tower', layouts: {}, layoutLoading: false, layoutError: '', morph: null, glow: 1, fov: 80, bringPrev: null, glowAuto: false, frameMs: 0, slowMs: 0, yawTarget: null, ys: { v: 0 }, decls: [], hoverSat: -1, hand: 'right', scale: 0.08, grab: null, uiHidden: false, followTarget: -1, fs: { v: 0 }, nodeDist: { right: null, left: null }, lastNodeDist: null,
+    layout: 'tower', builtNow: new Set(), links: 'fibers', layoutTarget: 'tower', layouts: {}, layoutLoading: false, layoutError: '', morph: null, glow: 1, fov: 80, bringPrev: null, glowAuto: false, frameMs: 0, slowMs: 0, yawTarget: null, ys: { v: 0 }, decls: [], hoverSat: -1, hand: 'right', scale: 0.08, grab: null, uiHidden: false, followTarget: -1, fs: { v: 0 }, nodeDist: { right: null, left: null }, lastNodeDist: null,
     n: 0, meta: null, pos: null, depth: null, ns: null, pk: null, ids: null, names: null, nameIdx: null,
     csr: null, st: null, stF: null, hiF: null,
     view: 'tower', color: 0, hideOpen: false, closureOn: true, closureOnly: false, follow: false, followStill: false, mini: false,
@@ -704,7 +704,7 @@
       if (k > 5.5) c += vCol*(.35 + .35*sin(uTime*3. + vSeed*20.));
       gl_FragColor = vec4(c, uAlpha);
     }`;
-  const CORE_R = 0.2, MAX_SATS = 160;
+  const CORE_R = 0.2, MAX_SATS = 160, HEART_W = 1.0;
   let core = null;
   function makeCore() {
     const group = new THREE.Group(); group.visible = false;
@@ -883,10 +883,18 @@
       const crown = c.i === mainIdx; c.group.scale.setScalar(crown ? CROWN_SCALE : 1);
       u.uColor.value.setHex(crown ? GOLD : tele ? 0xff8a3d : STATE_COLOR[st] || STATE_COLOR[0]);
       const r = tele ? 0.035 + 0.06 * Math.min(1, (tele.rssMB || 0) / 8192) : 0.03;
-      c.heart.scale.setScalar(r * (1 + 0.18 * Math.sin(T * (2 + 7 * u.uEnergy.value))));
+      c.heart.scale.setScalar(r * (1 + 0.18 * Math.sin(T * HEART_W * (1 + 3.5 * u.uEnergy.value))));   // pulse: faster with CPU (half the old rate, so the code stays readable)
       const hot = crown ? GOLD_HOT : tele ? 0xffd7a8 : STATE_COLOR[st] || 0xdfe9ff;
       for (const m of [c.heart, c.nucleus]) { const hu = m.material.uniforms; hu.uTime.value = T; hu.uEnergy.value = u.uEnergy.value; hu.uAlpha.value = 0.85 * e; hu.uColor.value.setHex(hot); }
-      c.nucleus.scale.setScalar(c.heart.scale.x * 0.5 * (1 + 0.12 * Math.sin(T * (3 + 5 * u.uEnergy.value) + 1.3))); c.nucleus.material.uniforms.uAlpha.value = 0.95 * e;
+      // nucleus = estimated progress of compiling this module (Lean reports none, so: elapsed / expected time from the server);
+      // it grows from a seed to full size, a built module has a full one, and the moment the module finishes it flashes once.
+      const built = !tele && S.builtNow.has(c.i);
+      const pr = L.nucleusProgress(tele, built ? 3 : st, (performance.now() - (S.statusAt || 0)) / 1000);
+      if (c.lastTele && !tele && c.i === c.lastI && (built || st === 2 || st === 3)) c.flash = 1;
+      c.lastTele = !!tele; c.lastI = c.i; c.flash = Math.max(0, (c.flash || 0) - dt / 0.9); c.progress = pr;
+      const over = tele && pr >= 1 ? 1 + 0.12 * Math.sin(T * 1.6) : 1;                         // past the estimate: a slow breath ("still at it")
+      c.nucleus.scale.setScalar(c.heart.scale.x * 0.5 * (0.18 + 0.82 * pr) * over * (1 + 0.9 * c.flash)); c.nucleus.material.uniforms.uAlpha.value = 0.95 * e;
+      c.nucleus.material.uniforms.uEnergy.value = Math.min(1, u.uEnergy.value + c.flash);
       c.sats.material.uniforms.uAlpha.value = e; c.sats.material.uniforms.uTime.value = T;
       for (let k = 0; k < c.orbit.length; k++) {
         const o = c.orbit[k], a = o.ph + T * o.om * (0.6 + u.uEnergy.value);
@@ -1134,7 +1142,7 @@
   }
   async function pollStatus() {
     try {
-      S.status = await jget('/api/status'); soundLoad(S.status.sys);
+      S.status = await jget('/api/status'); S.statusAt = performance.now(); soundLoad(S.status.sys);
       for (const m of S.status.compiling || []) { S.live.set(m.i, performance.now() + 12000); S.stF[m.i] = 4; S.dirtyState = true; }
       coreTelemetry(); followStep(S.status.compiling);
       panels.log.dirty = true; panels.menu.dirty = true;
@@ -1148,6 +1156,7 @@
   }
   function liveBuilt(i) {
     S.live.set(i, performance.now() + 9000); S.stF[i] = 4; S.dirtyState = true;
+    S.builtNow.add(i);                                       // built in this session (the state poll catches up within 8 s)
   }
   function connectEvents() {
     const es = new EventSource('/api/events');

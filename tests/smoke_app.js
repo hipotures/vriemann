@@ -485,6 +485,21 @@ load('lib.js'); load('audio.js'); load('app.js');
     await until(() => S.src.name === S.names[i2] && (S.src.tok || S.src.error)); frame(16, 3); assert.strictEqual(slot.heart.material.uniforms.uHasCode.value, S.src.tok && RH.codeLines(S.src.tok).length ? 1 : 0);
     frame(16, 60);
   });
+  await t('core: the nucleus shows the estimated compile progress (grows, breathes past the estimate, flashes when done); the code sphere pulses at half the old rate', async () => {
+    setView('tower'); let i = -1; for (let k = 0; k < S.n; k++) if (S.st[k] === 0 && S.csr.impStart[k + 1] - S.csr.impStart[k] >= 2) { i = k; break; }
+    RH.select(i); frame(16, 60); const c = RH.core(); assert.strictEqual(c.i, i);
+    const nuc = () => c.nucleus.scale.x / (c.heart.scale.x * 0.5), setTele = (secs) => { S.status = { ...(S.status || {}), compiling: [{ i, name: S.names[i], secs, est: 20, cpu: 90, rssMB: 4000 }] }; S.statusAt = performance.now(); RH.coreTelemetry(); };
+    RH.coreTelemetry(); frame(16, 3); assert(Math.abs(nuc() - 0.18) < 1e-6, 'open module: only a seed (' + nuc() + ')');
+    setTele(2); frame(16, 1); const n1 = nuc(); setTele(10); frame(16, 1); const n2 = nuc(); setTele(19); frame(16, 1); const n3 = nuc();
+    assert(n1 < n2 && n2 < n3 && n3 <= 1.0001, 'grows with elapsed / expected: ' + [n1, n2, n3].map((x) => x.toFixed(3)));
+    assert(Math.abs(n2 - (0.18 + 0.82 * 0.5)) < 0.02, 'half-way at half the estimate: ' + n2);
+    setTele(60); const over = []; for (let k = 0; k < 45; k++) { await new Promise((r) => setTimeout(r, 100)); setTele(60); frame(16, 1); over.push(nuc()); } assert(Math.max(...over) > 1.05 && Math.min(...over) < 0.95, 'past the estimate it breathes: ' + Math.min(...over).toFixed(3) + '..' + Math.max(...over).toFixed(3) + ' tele=' + JSON.stringify(RH.core().tele));
+    // done: the compile entry disappears and the module is marked built -> one flash, then a full nucleus
+    S.status = { ...S.status, compiling: [] }; global.__es.onmessage({ data: JSON.stringify({ k: 'built', i, name: S.names[i], n: 1, N: 2, s: 30 }) }); RH.coreTelemetry(); frame(16, 1);
+    assert(nuc() > 1.5, 'it flashes when the module is done: ' + nuc()); frame(16, 80); assert(Math.abs(nuc() - 1) < 1e-6, 'then stays full: ' + nuc());
+    // the code sphere: half the old pulse rate
+    const src = RH.coreTick.toString(); assert(src.includes('T * HEART_W * (1 + 3.5 * u.uEnergy.value)'), 'heart pulse = old (2 + 7e) / 2');
+  });
   await t('Main is special: an always-visible golden landmark at the top of the tower, and a crowned (larger, golden) core when selected', async () => {
     const b = RH.beacon(), mi = RH.mainIdx(); assert(b && mi >= 0, 'the beacon must exist'); setView('tower'); RH.clearSelForTest && RH.clearSelForTest();
     panels.info.buttons.find((x) => x.label === 'Clear') && panels.info.buttons.find((x) => x.label === 'Clear').fn(); frame(16, 40);

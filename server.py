@@ -7,7 +7,7 @@ prepared Lean volume (source code) and our own build logs/receipts.  No GitHub c
   python3 server.py                      # http://127.0.0.1:8443
   python3 server.py --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # HTTPS for WebXR
 """
-import argparse, gzip, json, os, re, ssl, sys, threading, time, queue, collections
+import math, argparse, gzip, json, os, re, ssl, sys, threading, time, queue, collections
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -75,6 +75,43 @@ def publish(ev):
                 subs.discard(q)
 
 
+durations = {}                       # module index -> seconds Lean took to build it (from our build logs)
+_lines = {}
+_fit = {"n": -1, "a": 3.1, "b": 0.18, "sd": 0.3}
+
+
+def src_lines(name):
+    if name not in _lines:
+        try:
+            with open(SRC_ROOT / (name.replace(".", "/") + ".lean"), "rb") as f:
+                _lines[name] = sum(1 for _ in f)
+        except OSError:
+            _lines[name] = 0
+    return _lines[name]
+
+
+def time_model():
+    """secs ~ a * lines^b, a least-squares fit in log space over every module we have built (refit as history grows), with its residual sd."""
+    if abs(len(durations) - _fit["n"]) >= 200 or _fit["n"] < 0:
+        pts = [(math.log(n), math.log(t)) for k, t in list(durations.items()) if t >= 0.3 and (n := src_lines(names[k])) >= 3]
+        if len(pts) >= 30:
+            mx = sum(x for x, _ in pts) / len(pts); my = sum(y for _, y in pts) / len(pts)
+            vx = sum((x - mx) ** 2 for x, _ in pts)
+            b = sum((x - mx) * (y - my) for x, y in pts) / vx if vx > 0 else 0.0
+            a = my - b * mx
+            sd = (sum((y - a - b * x) ** 2 for x, y in pts) / len(pts)) ** 0.5
+            _fit.update(a=math.exp(a), b=b, sd=sd)
+        _fit["n"] = len(durations)
+    return _fit
+
+
+def estimate_secs(name):
+    """Expected compile time of a module, generous (90th percentile of the fit): Lean reports no progress inside a module,
+    and the file length explains only part of it, so most modules should finish before the estimate runs out."""
+    f = time_model()
+    return max(3.0, min(3600.0, f["a"] * max(1, src_lines(name)) ** f["b"] * math.exp(1.2816 * f["sd"])))
+
+
 def parse_line(text, announce):
     text = ANSI.sub("", text).rstrip()
     if not text:
@@ -85,6 +122,7 @@ def parse_line(text, announce):
         if k is not None:
             ours.add(k)
             secs = float(m.group(4)) / (1000.0 if m.group(5) == "ms" else 1.0)
+            durations[k] = secs
             if announce:
                 publish({"k": "built", "i": k, "name": m.group(3), "n": int(m.group(1)), "N": int(m.group(2)), "s": secs})
             return
@@ -238,7 +276,7 @@ def compiling():
                     cpu = prev[2]
                 _pprev[pid] = (ticks, now, cpu) if (not prev or now - prev[1] > 0.5) else prev
                 rss = int(open(f"/proc/{pid}/statm").read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 1048576
-                out.append({"i": k, "name": name, "secs": round(up - start / hz), "cpu": round(cpu), "rssMB": round(rss)})
+                out.append({"i": k, "name": name, "secs": round(up - start / hz), "cpu": round(cpu), "rssMB": round(rss), "est": round(estimate_secs(name), 1)})
         except (OSError, ValueError, IndexError):
             continue
     return sorted(out, key=lambda d: -d["secs"])
@@ -464,7 +502,7 @@ class Server(ThreadingHTTPServer):
 
 
 def main():
-    scan_history()
+    scan_history(); time_model()            # fit the compile-time model once up front (reads ~50k source files, ~2 s)
     # start the tailer at the end of the existing active log, but keep a short tail for the panel
     p, mt = newest_log()
     if p is not None:

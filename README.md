@@ -26,7 +26,10 @@ A = put the panels in front of me, B = tower ⇄ miniature on a table, X = follo
 - **Hands**: without controllers you see your hands (hand tracking); aiming = a ray from the shoulder through the index fingertip, pinch = click.
 - **The selected module** is a living sphere: a full surface with flowing bands and one "comet" per import (speed grows with the CPU of the `lean` process
   compiling that module right now); the core pulses and grows with memory (RES = resident size, mostly shared Mathlib .olean files);
-  time/CPU/RES are in the Live build panel, there is no text over the sphere. **Declarations from the code** orbit around it (theorem/lemma/def/instance/axiom; size = length, `axiom` in red) –
+  time/CPU/RES are in the Live build panel, there is no text over the sphere. The middle sphere carries the module's **Lean code** on its surface and pulses
+  (faster with CPU, slowly enough to read). The small **nucleus** inside shows the **estimated compile progress**: Lean reports no progress within a module, so the server
+  estimates the expected time from the file length with a power law fitted to every module we have built (90th percentile: ~94% finish before it runs out). The nucleus grows
+  from a seed to full size, **breathes slowly when a module runs past its estimate**, flashes once when the module is built, and stays full for built modules. **Declarations from the code** orbit around it (theorem/lemma/def/instance/axiom; size = length, `axiom` in red) –
   **clicking a satellite scrolls the code to that declaration** and highlights it.
   Changing the selected module is a **smooth crossfade** (~0.4 s): the old sphere fades out, the new one fades in, both are visible at once, and a soft arc with a travelling point "hands over" attention.
 - **Live build** panel: machine CPU and RAM bars plus the number of `lean` processes, so you can see that work is happening.
