@@ -682,6 +682,10 @@ load('lib.js'); load('audio.js'); load('app.js');
     assert.strictEqual(shown.length, labels.length, 'one sprite per label'); assert(shown.every((x) => x.material.depthTest === false && x.material.sizeAttenuation === false), 'labels always readable, constant size');
     assert.deepStrictEqual(shown.map((x) => x.userData.letter).sort(), labels.map((x) => x.letter).sort());
     const L2 = RH.DEBUG_KINDS.map((k) => k[0]); assert.strictEqual(new Set(L2).size, L2.length, 'letters are unique');
+    // zooming in must not magnify the labels: their size times the zoom factor stays the same on screen
+    const onScreen = () => { const sp = RH.dbgGroup().children.find((x) => x.visible); return sp.scale.y / Math.tan(S.fov * Math.PI / 360); };
+    const fov0 = S.fov, s0 = onScreen(); RH.setFov(RH.FOV_MIN); frame(); const s1 = onScreen(); RH.setFov(fov0); frame();
+    assert(Math.abs(s1 / s0 - 1) < 1e-6, 'label grows with zoom: ' + (s1 / s0).toFixed(3));
     setView('packets'); assert.strictEqual(RH.debugLabels().length, 0, 'packets view: no labels'); setView('tower');
     press('KeyI'); assert(!S.debug && !RH.dbgGroup().visible, 'I again hides them');
   });

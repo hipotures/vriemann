@@ -102,7 +102,7 @@ The passive dots (open / assigned / built modules not connected to the selection
 | M | zeta zero on the critical line |
 | N | hover marker |
 
-Only a few of each are labelled (the 24 bubbles nearest to you, 10 satellites, 6 import and 4 consumer links, 3 zeros); tune it with `DEBUG` in `app.js`.
+Labels keep the same small size on screen while zooming. Only a few of each are labelled (the 24 bubbles nearest to you, 10 satellites, 6 import and 4 consumer links, 3 zeros); tune it with `DEBUG` in `app.js`.
 
 ## Tests
     node tests/test_lib.js                                   # logic on the real data

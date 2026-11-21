@@ -999,7 +999,7 @@
     ['J', 'hair line (links beyond 192)', '#8fa3c8'], ['K', 'hand-over arc (selection change)', '#9fd8ff'], ['L', 'Main landmark (star, rings)', '#ffd36b'],
     ['M', 'zeta zero on the critical line', '#fff0d0'], ['N', 'hover marker', '#ffd133'],
   ];
-  const DEBUG = { bubbles: 24, sats: 10, imp: 6, con: 4, hair: 3, zeros: 3, size: 0.032 };
+  const DEBUG = { bubbles: 24, sats: 10, imp: 6, con: 4, hair: 3, zeros: 3, size: 0.02 };      // size: label height at the default 80° view; kept constant on screen when zooming
   let dbgGroup = null; const dbgMats = {}, dbgPool = [];
   function dbgMat(letter) {
     if (dbgMats[letter]) return dbgMats[letter];
@@ -1010,6 +1010,8 @@
     const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
     return (dbgMats[letter] = new THREE.SpriteMaterial({ map: t, transparent: true, depthTest: false, depthWrite: false, sizeAttenuation: false, toneMapped: false }));
   }
+  /** label size: the same on screen in the miniature (world scale) and while zooming (a narrower view would magnify it) */
+  const dbgScale = () => DEBUG.size * Math.tan((S.fov || 80) * Math.PI / 360) / Math.tan(40 * Math.PI / 180) / Math.max(world.scale.x, 1e-4);
   function toggleDebug() { S.debug = !S.debug; S.dbgPick = 0; if (dbgGroup) dbgGroup.visible = S.debug; if (panels.menu) panels.menu.dirty = true; }
   /** the labels of this frame: [{ letter, p: Vector3 in world-local coordinates }] */
   function debugLabels() {
@@ -1049,7 +1051,7 @@
     while (dbgPool.length < labels.length) { const sp = new THREE.Sprite(dbgMat('A')); sp.center.set(-0.15, -0.15); sp.renderOrder = 999; sp.frustumCulled = false; dbgPool.push(sp); dbgGroup.add(sp); }
     dbgPool.forEach((sp, k) => {
       const l = labels[k]; sp.visible = !!l; if (!l) return;
-      sp.material = dbgMat(l.letter); sp.userData.letter = l.letter; sp.position.copy(l.p); const k2 = DEBUG.size / Math.max(world.scale.x, 1e-4); sp.scale.set(k2, k2, 1);   // constant on screen, also in the miniature
+      sp.material = dbgMat(l.letter); sp.userData.letter = l.letter; sp.position.copy(l.p); const k2 = dbgScale(); sp.scale.set(k2, k2, 1);
     });
   }
   const hideLinks = () => { lines.geometry.setDrawRange(0, 0); ribbons.geometry.setDrawRange(0, 0); fibers.geometry.setDrawRange(0, 0); for (const c of cores) c.shellMat.uniforms.uDockN.value = 0; };
