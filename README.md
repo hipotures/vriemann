@@ -1,4 +1,4 @@
-# vRiemann – RH replay proof tower (VR / desktop viewer)
+# VRiemann – RH replay proof tower (VR / desktop viewer)
 
 A visualization of the Lean verification of Alpöge's RH proof ([alpoge-rh-replay](https://github.com/rohanarun/alpoge-rh-replay)):
 175,187 modules as a "tower" (Y axis = import depth, each ring = the modules of one depth, sorted by name). Everything is read locally – no GitHub requests.
