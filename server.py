@@ -358,7 +358,8 @@ def status():
 
 # ---------------------------------------------------------------- HTTP
 MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css",
-        ".json": "application/json", ".txt": "text/plain; charset=utf-8"}
+        ".json": "application/json", ".txt": "text/plain; charset=utf-8",
+        ".woff2": "font/woff2", ".md": "text/plain; charset=utf-8"}
 GZ_CACHE = {}
 STATIC = {"/": ROOT / "static/index.html"}
 

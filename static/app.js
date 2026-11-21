@@ -265,6 +265,7 @@
 
   // ------------------------------------------------------------------ canvas panels
   const MONO = '"DejaVu Sans Mono","Noto Sans Mono",Menlo,Consolas,monospace';
+  const SRC_FONT = '"Iosevka Fixed VR",' + MONO;        // narrow code font for the source panel (vendored woff2, loaded in index.html)
   const SANS = 'system-ui,"Segoe UI",Roboto,sans-serif';
   const panels = {};
   const PANEL_RENDER_ORDER = 100;
@@ -525,8 +526,9 @@
   // ---- source panel
   const SRC_COL = { c: '#6b7a99', s: '#e6b673', k: '#82aaff', r: '#ff5c5c', n: '#c3e88d', x: '#d6deeb' };
   const LINE_H = 34, SRC_TOP = 100, SRC_LEFT = 100;
+  // repaint the source panel once the code font has arrived (the first paint may have used the fallback)
+  if (document.fonts && document.fonts.load) document.fonts.load('28px "Iosevka Fixed VR"').then(() => { if (S.src) S.src.rows = null; if (panels.source) panels.source.dirty = true; }).catch(() => {});
   function srcVisible() { return Math.floor((panels.source.ph - SRC_TOP - 20) / LINE_H); }
-  const cpLen = (str) => { let n = 0; for (const _ of str) n++; return n; };
   function srcRows(cols) {
     const s = S.src; if (!s.tok) return [];
     if (!s.rows || s.rowsCols !== cols) { s.rows = L.wrapTokens(s.tok, cols); s.rowsCols = cols; }
@@ -541,7 +543,7 @@
     const red = s.red;
     text(c, `${s.lines} lines · ${(s.bytes / 1024).toFixed(1)} kB · ` + (red.sorry + red.axiom ? `sorry ${red.sorry} · axiom ${red.axiom}` : 'no sorry / axiom'), 36, 78,
       { size: 22, color: red.sorry + red.axiom ? '#ff5c5c' : '#7be495' });
-    c.font = `28px ${MONO}`; const cw = c.measureText('M').width, vis = srcVisible();
+    c.font = `28px ${SRC_FONT}`; const cw = c.measureText('M').width, vis = srcVisible();
     s.cols = Math.max(20, Math.floor((p.pw - SRC_LEFT - 120) / cw));
     const rows = srcRows(s.cols);
     s.scroll = Math.min(s.scroll, Math.max(0, rows.length - vis));
@@ -549,10 +551,14 @@
       const row = rows[s.scroll + r]; if (!row) break;
       const y = SRC_TOP + r * LINE_H + 26;
       if (s.hl && row.li >= s.hl.from && row.li <= s.hl.to) { c.fillStyle = row.li === s.hl.from ? 'rgba(80,140,255,.30)' : 'rgba(80,140,255,.13)'; c.fillRect(SRC_LEFT - 8, y - 22, p.pw - SRC_LEFT - 100, LINE_H); }
-      if (row.n) { c.fillStyle = '#4a5673'; c.font = `22px ${MONO}`; c.textAlign = 'right'; c.fillText(String(row.n), SRC_LEFT - 12, y); }
-      c.font = `28px ${MONO}`; c.textAlign = 'left';
+      if (row.n) { c.fillStyle = '#4a5673'; c.font = `22px ${SRC_FONT}`; c.textAlign = 'right'; c.fillText(String(row.n), SRC_LEFT - 12, y); }
+      c.font = `28px ${SRC_FONT}`; c.textAlign = 'left';
       let col = 0;
-      for (const [t, ty] of row.toks) { c.fillStyle = SRC_COL[ty]; c.fillText(t, SRC_LEFT + col * cw, y); col += cpLen(t); }
+      for (const [t, ty] of row.toks) {
+        c.fillStyle = SRC_COL[ty];
+        if (/^[\x20-\x7e]*$/.test(t)) { c.fillText(t, SRC_LEFT + col * cw, y); col += t.length; continue; }
+        for (const ch of t) { c.fillText(ch, SRC_LEFT + col * cw, y); col++; }   // one cell per character: a fallback glyph (e.g. 𝓞) cannot shift the rest of the row
+      }
     }
     // scrollbar + buttons
     const bx = p.pw - 90;

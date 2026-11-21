@@ -28,6 +28,8 @@ either put the server behind a reverse proxy that terminates TLS, or give it a c
     python3 server.py --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # https://<host>:8443/
 
 A-Frame 1.7.0 (three.js r173) is vendored in `vendor/`, so no CDN is used. The server never contacts GitHub.
+The source panel uses **Iosevka Fixed** (narrow monospace, SIL OFL 1.1, `vendor/fonts/`), subset to the characters that occur in the Lean sources (23 kB woff2);
+a few script capitals such as 𝓞 fall back to the system font. Each character gets its own grid cell, so a fallback glyph never shifts the rest of the row.
 
 ## Controls
 Desktop: drag = look around, WASD = move, Q/E = elevator (depth), click = select / press a button, wheel over the code = scroll (in the miniature: size),

@@ -5,8 +5,8 @@ const THREE = require('three');
 const BASE = process.argv[2] || 'http://127.0.0.1:18443';
 
 // ---- fake 2D canvas context: records nothing, measures text as 10px/char
-const drawn = [];   // every string drawn on any panel canvas, so tests can check what the user would read
-const ctx2d = new Proxy({}, { get: (t, k) => k === 'measureText' ? (s) => ({ width: String(s).length * 10 }) : k === 'fillText' ? (s) => { drawn.push(String(s)); } : (k === 'createRadialGradient' || k === 'createLinearGradient') ? () => ({ addColorStop() {} }) : (k in t ? t[k] : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
+const drawn = [], drawnAt = [];   // drawnAt: the same strings with their x and the font set at the time   // every string drawn on any panel canvas, so tests can check what the user would read
+const ctx2d = new Proxy({}, { get: (t, k) => k === 'measureText' ? (s) => ({ width: String(s).length * 10 }) : k === 'fillText' ? (s, x) => { drawn.push(String(s)); drawnAt.push({ s: String(s), x, font: t.font }); } : (k === 'createRadialGradient' || k === 'createLinearGradient') ? () => ({ addColorStop() {} }) : (k in t ? t[k] : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
 const mkCanvas = () => ({ width: 0, height: 0, getContext: () => ctx2d, addEventListener() {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) });
 const ents = {};
 const ent = (id, o3d) => (ents[id] = { id, object3D: o3d || new THREE.Object3D(), listeners: {}, addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }, remove() {} });
@@ -828,6 +828,25 @@ load('lib.js'); load('audio.js'); load('app.js');
     drawn.length = 0; S.status = { ...STATUS, compiling: [{ i: 3, name: 'A.B', secs: 20, cpu: 100, rssMB: 4000 }], phase: { kind: 'building', text: 'building P9' } }; for (const k in panels) panels[k].dirty = true; frame();
     assert(drawn.includes('compiling'), 'while a module compiles the header says so'); S.status = STATUS;
     drawn.length = 0; S.status = { ...STATUS }; delete S.status.phase; for (const k in panels) panels[k].dirty = true; frame(); assert(drawn.includes('idle'), 'an old server without phase still renders'); S.status = STATUS;
+  });
+  await t('source panel: narrow vendored code font, one grid cell per character (a fallback glyph cannot shift the row)', async () => {
+    const i = S.nameIdx.get('Development.AutomorphicSpectrum.Proofs.GeometryProofs.CmPackPureNormStatement');
+    assert(i !== undefined, 'test module missing from the index'); RH.select(i);
+    await until(() => S.src.name === S.names[i] && (S.src.tok || S.src.error)); assert(S.src.tok, 'source did not load: ' + S.src.error);
+    S.src.scroll = 8; drawnAt.length = 0; panels.source.dirty = true; frame();
+    const code = drawnAt.filter((d) => /Iosevka Fixed VR/.test(d.font || '') && /^28px/.test(d.font));
+    assert(code.length > 50, 'code rows must be drawn with the Iosevka code font: ' + code.length);
+    assert(!drawnAt.some((d) => /^28px "DejaVu/.test(d.font || '')), 'no code row may still use the wide DejaVu-first stack');
+    const odd = code.filter((d) => /[^\x20-\x7e]/.test(d.s));
+    assert(odd.length > 5 && odd.every((d) => [...d.s].length === 1), 'every non-ASCII character is drawn on its own: ' + odd.slice(0, 5).map((d) => d.s));
+    assert(odd.some((d) => d.s === '𝓞'), 'the astral 𝓞 (fallback glyph) is drawn as one character');
+    const cw = 10, off = code.map((d) => (d.x - 100) / cw);   // fake measureText: 10 px per UTF-16 unit; 'M' = 10
+    assert(off.every((o) => Math.abs(o - Math.round(o)) < 1e-9), 'every piece starts exactly on a character cell');
+    const html = await (await fetch(BASE + '/')).text();
+    assert(/@font-face\{font-family:"Iosevka Fixed VR";src:url\(\/vendor\/fonts\/IosevkaFixed-Regular\.woff2\)/.test(html), 'the page declares the vendored font');
+    const f = await fetch(BASE + '/vendor/fonts/IosevkaFixed-Regular.woff2');
+    assert(f.ok && f.headers.get('content-type') === 'font/woff2' && (await f.arrayBuffer()).byteLength > 10000, 'the font is served locally as font/woff2');
+    S.src.scroll = 0;
   });
   await t('clearSel resets everything', () => { panels.info.buttons.find((b) => b.label === 'Clear').fn(); assert.strictEqual(S.sel, -1); assert(S.hiF.every((x) => x === 0)); frame(); });
   console.log(ok + ' smoke tests passed'); process.exit(errors.length ? 1 : 0);
