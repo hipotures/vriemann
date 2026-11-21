@@ -1233,8 +1233,13 @@
     applyUniforms(); panels.info.dirty = true; syncSourcePanel();
   }
   /** Desktop zoom (field of view); in VR the headset decides. */
+  // zoom = magnification 1/tan(fov/2).  Limits: 2x further in and 2x further out than the old 20..100 degrees.
+  const fovFor = (fov, k) => 2 * Math.atan(Math.tan(fov * Math.PI / 360) * k) * 180 / Math.PI;
+  const FOV_MIN = fovFor(20, 0.5), FOV_MAX = fovFor(100, 2), ZOOM_STEP = 1.12;
+  /** k < 1 zooms in, k > 1 out (same ratio at every zoom level, so the steps feel even) */
+  function zoomBy(k) { setFov(fovFor(S.fov, k)); }
   function setFov(v) {
-    S.fov = Math.max(20, Math.min(100, v));
+    S.fov = Math.max(FOV_MIN, Math.min(FOV_MAX, v));
     if (camEl && camEl.setAttribute) camEl.setAttribute('camera', 'fov', S.fov);
   }
   /** Closure: off (everything normal) -> dim (rest at 22%) -> only (rest hidden completely) -> off */
@@ -1495,7 +1500,7 @@
       const r = mouseRay(e); interact(r.o, r.d, false);
     });
     cv.addEventListener('wheel', (e) => {
-      if (e.shiftKey) { setFov(S.fov + Math.sign(e.deltaY || e.deltaX) * 5); return; }      // Shift + wheel = zoom
+      if (e.shiftKey) { zoomBy(Math.sign(e.deltaY || e.deltaX) > 0 ? ZOOM_STEP : 1 / ZOOM_STEP); return; }      // Shift + wheel = zoom
       if (S.overPanel === panels.source) scrollSrc(Math.sign(e.deltaY) * 6);
       else if (S.mini) scaleMini(e.deltaY < 0 ? 1.1 : 1 / 1.1);
       else { S.focusTarget = null; S.focus = clampFocus(S.focus - Math.sign(e.deltaY) * 0.6); }
@@ -1505,8 +1510,8 @@
       unlockSound();
       if (e.code === 'KeyE') S.keys.up = true;
       if (e.code === 'KeyQ') S.keys.down = true;
-      if (e.code === 'Equal' || e.code === 'NumpadAdd') setFov(S.fov - 5);          // zoom in
-      if (e.code === 'Minus' || e.code === 'NumpadSubtract') setFov(S.fov + 5);     // zoom out
+      if (e.code === 'Equal' || e.code === 'NumpadAdd') zoomBy(1 / ZOOM_STEP);          // zoom in
+      if (e.code === 'Minus' || e.code === 'NumpadSubtract') zoomBy(ZOOM_STEP);     // zoom out
       if (e.repeat) return;                                   // toggles must not flicker while a key is held
       if (e.code === 'Digit0' || e.code === 'Numpad0') setFov(80);
       if (e.code === 'KeyM' || e.code === 'KeyB') toggleMini();       // tower <-> miniature   (VR: B)
@@ -1591,7 +1596,7 @@
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
     const el = $('loading'); if (el) el.remove();
-    window.RH = { ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, link, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
+    window.RH = { FOV_MIN, FOV_MAX, ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, link, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }
   boot();
 })();

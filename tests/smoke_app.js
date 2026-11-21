@@ -359,12 +359,15 @@ load('lib.js'); load('audio.js'); load('app.js');
     assert(RH.rulers.length > 0 && RH.rulers.every((m) => m.visible));
     press('KeyH'); assert(RH.rulers.every((m) => !m.visible), 'depth labels must hide with the UI'); press('KeyH'); assert(RH.rulers.every((m) => m.visible));
     assert.strictEqual(ents.cam.fov === undefined ? 80 : ents.cam.fov, ents.cam.fov === undefined ? 80 : ents.cam.fov);
-    press('Equal'); assert.strictEqual(S.fov, 75); for (let k = 0; k < 30; k++) press('Equal'); assert.strictEqual(S.fov, 20, 'zoom in is limited');
-    for (let k = 0; k < 40; k++) press('Minus'); assert.strictEqual(S.fov, 100, 'zoom out is limited'); assert.strictEqual(ents.cam.fov, 100);
+    const mag = (f) => 1 / Math.tan(f * Math.PI / 360);
+    press('Equal'); assert(S.fov < 80 && S.fov > 70, 'one step in: ' + S.fov); for (let k = 0; k < 60; k++) press('Equal'); assert.strictEqual(S.fov, RH.FOV_MIN, 'zoom in is limited');
+    assert(Math.abs(mag(RH.FOV_MIN) / mag(20) - 2) < 1e-9, 'zoom in reaches 2x the old limit (20 deg): ' + RH.FOV_MIN);
+    for (let k = 0; k < 80; k++) press('Minus'); assert.strictEqual(S.fov, RH.FOV_MAX, 'zoom out is limited'); assert.strictEqual(ents.cam.fov, RH.FOV_MAX);
+    assert(Math.abs(mag(100) / mag(RH.FOV_MAX) - 2) < 1e-9, 'zoom out reaches 2x the old limit (100 deg): ' + RH.FOV_MAX); assert(RH.FOV_MAX < 179);
     press('Digit0'); assert.strictEqual(S.fov, 80); assert.strictEqual(ents.cam.fov, 80);
     const wheel = winL.wheel; // (wheel is on the canvas)
-    sceneCanvas.listeners.wheel[0]({ deltaY: -100, shiftKey: true }); assert.strictEqual(S.fov, 75, 'Shift+wheel up zooms in');
-    sceneCanvas.listeners.wheel[0]({ deltaY: 0, deltaX: 100, shiftKey: true }); assert.strictEqual(S.fov, 80, 'browsers swap Shift+wheel to deltaX');
+    sceneCanvas.listeners.wheel[0]({ deltaY: -100, shiftKey: true }); assert(S.fov < 80, 'Shift+wheel up zooms in');
+    sceneCanvas.listeners.wheel[0]({ deltaY: 0, deltaX: 100, shiftKey: true }); assert(Math.abs(S.fov - 80) < 1e-9, 'browsers swap Shift+wheel to deltaX (and in/out are exact inverses)');
     const e0 = S.focus; sceneCanvas.listeners.wheel[0]({ deltaY: 100, shiftKey: false }); assert(S.focus !== e0 || S.mini, 'plain wheel must still move the elevator');
   });
   await t('depth labels face the viewer: outward from outside the tower, inward once you are inside it', () => {
