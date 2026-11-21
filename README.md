@@ -37,6 +37,7 @@ Desktop: drag = look around, WASD = move, Q/E = elevator (depth), click = select
 VR (Touch controllers): trigger = select / button, left stick ▲▼ = elevator, right stick ◀▶ = rotate the world, right stick ▲▼ over the code = scroll,
 A = put the panels in front of me, B = tower ⇄ miniature on a table, X = follow live, Y = hide/show the panels.
 
+A-Frame's **F** shortcut ("enter VR", which on a desktop without a headset only goes fullscreen) is switched off. VR mode means the headset is really presenting (`renderer.xr.isPresenting`), so a fullscreen browser keeps the mouse, the desktop menu and no controller beam.
 In the headset the menu leaves out the keyboard help (only warnings such as blocked sound remain); on the desktop the key hint sits on a dark backing.
 
 ## Recording, miniature, hands

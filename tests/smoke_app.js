@@ -16,9 +16,9 @@ camWrap.position.set(0, 1.6, 0); camWrap.updateMatrixWorld(true);
 ent('world'); ent('panels'); ent('cam', camWrap); ents.cam.setAttribute = (n, k, v) => { ents.cam.fov = v; }; ent('rc'); ent('lc'); ent('rh'); ent('lh'); ent('loading'); ent('hud'); ents.hud.style = { display: '' };
 const vrButton = { style: { display: '' } };
 const sceneCanvas = Object.assign(mkCanvas(), { listeners: {}, addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); } });
-let vrMode = false;
+let vrMode = false, fsFallback = false;   // fsFallback: A-Frame's desktop fullscreen (F key) sets 'vr-mode' without presenting XR
 const sceneRoot = new THREE.Scene();
-const scene = { hasLoaded: true, canvas: sceneCanvas, camera, object3D: sceneRoot, is: (s) => (s === 'vr-mode' ? vrMode : false), addEventListener() {} };
+const scene = { hasLoaded: true, canvas: sceneCanvas, camera, object3D: sceneRoot, is: (s) => (s === 'vr-mode' ? vrMode : false), renderer: { xr: { get isPresenting() { return vrMode && !fsFallback; } } }, addEventListener() {} };
 let tickFn = null;
 const winL = {}, docL = {};
 global.window = global; global.addEventListener = (n, f) => { (winL[n] = winL[n] || []).push(f); };
@@ -847,6 +847,25 @@ load('lib.js'); load('audio.js'); load('app.js');
     const f = await fetch(BASE + '/vendor/fonts/IosevkaFixed-Regular.woff2');
     assert(f.ok && f.headers.get('content-type') === 'font/woff2' && (await f.arrayBuffer()).byteLength > 10000, 'the font is served locally as font/woff2');
     S.src.scroll = 0;
+  });
+  await t("A-Frame's fullscreen fallback (F on the desktop) is not VR: no beams, the mouse works, desktop menu; F no longer triggers it", async () => {
+    const html = await (await fetch(BASE + '/')).text();
+    assert(/<a-scene[^>]*keyboard-shortcuts="enterVR: false"/.test(html), 'the F shortcut of A-Frame must be off');
+    vrMode = true; fsFallback = true; for (const k in panels) panels[k].dirty = true; frame(16, 3);
+    assert(!sceneRoot.children.filter((c) => c.isGroup).some((g) => g.visible), 'no controller beam in the fullscreen fallback');
+    drawn.length = 0; panels.menu.dirty = true; frame(); assert(drawn.some((x) => /Closure \(C\)/.test(x)), 'the desktop help stays in the menu');
+    const before = S.hideOpen, b = panels.menu.buttons.find((x) => x.label === 'Hide open'), mm = panels.menu.mesh, g = mm.geometry.parameters;
+    const u = (b.x + b.w / 2) / panels.menu.pw, v = 1 - (b.y + b.h / 2) / panels.menu.ph;
+    const wpt = new THREE.Vector3((u - 0.5) * g.width, (v - 0.5) * g.height, 0).applyMatrix4(mm.matrixWorld);
+    const q0 = camera.quaternion.clone(); camera.updateMatrixWorld(true); camera.lookAt(wpt); camera.updateMatrixWorld(true);   // look at the button, like a user would
+    const tgt = wpt.clone().project(camera); const cvs = sceneCanvas, rc = cvs.getBoundingClientRect(), W = rc.width, Hh = rc.height;
+    assert(Math.abs(tgt.x) < 1 && Math.abs(tgt.y) < 1 && tgt.z < 1, 'the menu button must be on screen for this test: ' + tgt.toArray().map((x) => x.toFixed(2)));
+    const ev = { clientX: (tgt.x + 1) / 2 * W, clientY: (1 - tgt.y) / 2 * Hh, buttons: 0, preventDefault() {} };
+    for (const f of cvs.listeners.mousedown || []) f(ev); for (const f of cvs.listeners.mouseup || []) f(ev);
+    assert.notStrictEqual(S.hideOpen, before, 'a mouse click on a menu button must work in the fullscreen fallback');
+    panels.menu.buttons.find((x) => x.label === 'Hide open').fn();   // restore
+    camera.quaternion.copy(q0); camera.updateMatrixWorld(true);
+    fsFallback = false; vrMode = false; for (const k in panels) panels[k].dirty = true; frame();
   });
   await t('clearSel resets everything', () => { panels.info.buttons.find((b) => b.label === 'Clear').fn(); assert.strictEqual(S.sel, -1); assert(S.hiF.every((x) => x === 0)); frame(); });
   console.log(ok + ' smoke tests passed'); process.exit(errors.length ? 1 : 0);

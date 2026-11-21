@@ -1034,7 +1034,8 @@
   }
   /** label size: the same on screen in the miniature (world scale) and while zooming (a narrower view would magnify it) */
   const dbgScale = () => DEBUG.size * Math.tan((S.fov || 80) * Math.PI / 360) / Math.tan(40 * Math.PI / 180) / Math.max(world.scale.x, 1e-4);
-  const inVR = () => { const sc = document.querySelector('a-scene'); return !!(sc && sc.is && sc.is('vr-mode')); };
+  // really in the headset: A-Frame also sets 'vr-mode' for its desktop fullscreen fallback, where the mouse must keep working and no beams belong
+  const inVR = () => { const sc = document.querySelector('a-scene'), xr = sc && sc.renderer && sc.renderer.xr; return !!(xr && xr.isPresenting); };
   function toggleDebug() { S.debug = !S.debug; S.dbgPick = 0; if (dbgGroup) dbgGroup.visible = S.debug; if (panels.menu) panels.menu.dirty = true; }
   /** the labels of this frame: [{ letter, p: Vector3 in world-local coordinates }] */
   function debugLabels() {
@@ -1574,7 +1575,7 @@
   }
   const BEAM_COLOR = { button: 0x40e0ff, panel: 0xdfe6f5, node: 0xffd133, none: 0x7f8fb3 };
   function beamTick(scene) {
-    const vr = scene.is('vr-mode');
+    const vr = inVR();
     const live = {};
     if (vr) for (const p of pointers()) live[p.id] = p;
     for (const [id] of PTR) {
@@ -1657,13 +1658,13 @@
     if (document.documentElement) document.documentElement.addEventListener('mouseleave', clearHover);
     window.addEventListener('blur', clearHover);
     cv.addEventListener('mouseup', (e) => {
-      if (!down || scene.is('vr-mode')) return;
+      if (!down || inVR()) return;
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y); down = null;
       if (moved < 5) { const r = mouseRay(e); interact(r.o, r.d, true); }
     });
     let lastMove = 0;
     cv.addEventListener('mousemove', (e) => {
-      const t = performance.now(); if (t - lastMove < 80 || e.buttons || scene.is('vr-mode')) return; lastMove = t;
+      const t = performance.now(); if (t - lastMove < 80 || e.buttons || inVR()) return; lastMove = t;
       const r = mouseRay(e); interact(r.o, r.d, false);
     });
     cv.addEventListener('wheel', (e) => {
@@ -1735,7 +1736,7 @@
     if (t - lastHoverT > 120 && !S.hoverSuspended) {
       lastHoverT = t;
       const scene = document.querySelector('a-scene');
-      if (scene.is('vr-mode')) hoverVR();
+      if (inVR()) hoverVR();
     }
     if (t - lastPoll > 8000) { lastPoll = t; pollState(); }
     if (t - lastStatus > 3000) { lastStatus = t; pollStatus(); }
@@ -1751,7 +1752,7 @@
     // adaptive quality: in VR, if frames stay slow (< ~42 fps) for 3 s, take the glow down one level (the saved choice is untouched; G raises it again)
     if (dtMs > 0 && dtMs < 500) {
       S.frameMs = S.frameMs ? S.frameMs * 0.9 + dtMs * 0.1 : dtMs;
-      if (S.frameMs > 24 && S.glow > 0 && document.querySelector('a-scene').is('vr-mode')) { S.slowMs += dtMs; if (S.slowMs > 3000) { S.glow--; S.glowAuto = true; S.slowMs = 0; S.frameMs = 0; applyGlow(); panels.menu.dirty = true; } }
+      if (S.frameMs > 24 && S.glow > 0 && inVR()) { S.slowMs += dtMs; if (S.slowMs > 3000) { S.glow--; S.glowAuto = true; S.slowMs = 0; S.frameMs = 0; applyGlow(); panels.menu.dirty = true; } }
       else S.slowMs = 0;
     }
     beamTick(document.querySelector('a-scene'));
