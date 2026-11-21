@@ -290,6 +290,7 @@ t('pickSolids: live first, then connected nearest to the selection, capped; sele
   assert.deepStrictEqual(L.pickSolids(hi, pos, 0, [4], 3).map((e) => e.i), [4, 2, 3], 'the cap keeps the live one and the nearest');
   assert.deepStrictEqual(L.pickSolids(hi, pos, 0, [3], 10).filter((e) => e.i === 3).map((e) => e.kind), [4], 'a live connected module appears once, as live');
   assert.deepStrictEqual(L.pickSolids(hi, pos, -1, [], 10), [], 'no selection: no connected bubbles');
+  assert(!L.pickSolids(hi, pos, 0, [0, 4], 10).some((e) => e.i === 0), 'a compiling selected module stays the core, no bubble inside it');
   assert.strictEqual(L.pickSolids(hi, pos, 0, [1, 2, 3], 2).length, 2, 'the cap also holds for live ones');
 });
 console.log(ok + ' tests passed');

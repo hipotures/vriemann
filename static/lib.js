@@ -164,11 +164,12 @@
    */
   /**
    * Which modules are drawn as real 3D bubbles: every live (compiling / just built) one first, then the connected ones
-   * (hi 1 = imports / ancestry, 2 = consumers) nearest to the selected module, at most `max` in total.
+   * (hi 1 = imports / ancestry, 2 = consumers) nearest to the selected module, at most `max` in total. The selected module itself is never one.
    * Returns [{ i, kind }] with kind 1 import, 2 consumer, 4 live.
    */
   function pickSolids(hi, pos, sel, live, max) {
     const out = [], taken = new Set();
+    taken.add(sel);                                                  // the selected module is the core: never a bubble inside it
     for (const i of live) { if (out.length >= max) return out; if (!taken.has(i)) { taken.add(i); out.push({ i, kind: 4 }); } }
     const cand = [];
     if (sel >= 0) {
