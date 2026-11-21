@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RH replay – proof tower</title>
+<style>
+  html,body{margin:0;height:100%;background:#05070d;color:#cbd5e1;font:14px system-ui,sans-serif}
+  #hud{position:fixed;left:12px;bottom:10px;z-index:10;max-width:560px;opacity:.75;pointer-events:none;line-height:1.45}
+  #loading{position:fixed;left:50%;top:40%;transform:translateX(-50%);z-index:20;font-size:18px;text-align:center}
+</style>
+<script src="/vendor/aframe.min.js"></script>
+<script src="/static/lib.js"></script>
+<script src="/static/audio.js"></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<div id="loading">loading graph…</div>
+<div id="hud">
+  <b>Keyboard:</b> drag = look · WASD = move · Q/E = elevator · click = select / press button · wheel = scroll source / miniature size ·
+  <b>B</b> or M = tower ⇄ miniature · <b>X</b> = follow live · <b>H</b> or <b>Y</b> = hide/show all UI · <b>N</b> = sound on/off · <b>G</b> = glow · <b>C</b> = closure off/dim/only · <b>L</b> = layout tower/helix · <b>R</b> = panels in front of me · <b>+ / −</b> or Shift+wheel = zoom (0 = reset)<br>
+  <b>VR:</b> trigger = select, left stick = elevator, right stick ◀▶ = rotate, ▲▼ = scroll source / size, grip = grab the miniature,
+  A = recenter panels, B = tower ⇄ miniature, X = follow live, Y = hide UI
+</div>
+<a-scene background="color: #05070d" renderer="antialias: true; foveationLevel: 0" loading-screen="enabled: false"
+         webxr="optionalFeatures: local-floor, bounded-floor, hand-tracking" vr-mode-ui="enabled: true">
+  <a-entity id="world" rh-tick></a-entity>
+  <a-entity id="panels"></a-entity>
+  <a-entity id="rig" position="0 0 0">
+    <a-entity id="cam" camera position="0 1.6 0" look-controls wasd-controls="acceleration: 30"></a-entity>
+    <a-entity id="lc" laser-controls="hand: left"></a-entity>
+    <a-entity id="rc" laser-controls="hand: right"></a-entity>
+    <a-entity id="lh" hand-tracking-controls="hand: left; modelColor: #f2d0b8"></a-entity>
+    <a-entity id="rh" hand-tracking-controls="hand: right; modelColor: #f2d0b8"></a-entity>
+  </a-entity>
+</a-scene>
+</body>
+</html>
