@@ -363,6 +363,8 @@
     p.button(c, 250, y + 168, 190, 64, 'Vol −', () => nudgeVolume(-0.1), false);
     p.button(c, 460, y + 168, 190, 64, 'Vol +', () => nudgeVolume(0.1), false);
     p.button(c, 670, y + 168, 190, 64, ['Glow: off', 'Glow: on', 'Glow: all'][S.glow], cycleGlow, S.glow > 0);
+    p.button(c, 40, y + 246, 190, 64, S.debug ? 'Debug: on' : 'Debug: off', toggleDebug, !!S.debug);
+    y += 78;
     text(c, 'Hide open: hide dots that are not built yet', 40, y + 266, { size: 20, color: '#7f8fb3' });
     text(c, 'Closure (C): off / dim the rest / only = hide everything but the selection + its imports', 40, y + 292, { size: 20, color: '#7f8fb3' });
     text(c, 'Miniature: grip / pinch-drag moves it · stick ▲▼ = size', 40, y + 318, { size: 20, color: '#7f8fb3' });
@@ -370,7 +372,13 @@
     text(c, S.glowAuto ? 'Glow lowered automatically: the frame rate was too low (G to raise)' : 'Glow (G): soft halo on built / active dots · "all" adds a faint one to open dots', 40, y + 370, { size: 20, color: S.glowAuto ? '#ffb454' : '#7f8fb3' });
     y += 426;
     // legend
-    if (S.color === 1) {
+    if (S.debug) {
+      text(c, 'DEBUG LABELS (I)', 40, y, { size: 20, color: '#7283a6', weight: 700 });
+      DEBUG_KINDS.forEach(([l, what, col], k) => {
+        const cx = 40 + (k % 2) * 420, cy = y + 30 + Math.floor(k / 2) * 30;
+        text(c, l, cx, cy, { size: 22, color: col, weight: 700, font: MONO }); c.font = `18px ${SANS}`; text(c, fit(c, what, 380), cx + 26, cy, { size: 18, color: '#cbd5e1' });
+      });
+    } else if (S.color === 1) {
       text(c, 'NAMESPACES (largest)', 40, y, { size: 20, color: '#7283a6', weight: 700 });
       S.meta.namespaces.slice(0, 6).forEach((n, i) => {
         const [r, g, b] = L.nsColor(i); c.fillStyle = `rgb(${r},${g},${b})`; c.beginPath(); c.arc(54, y + 30 + i * 34, 9, 0, 7); c.fill();
@@ -982,6 +990,68 @@
     solidList.forEach((e, n) => { a[3 * n] = P[3 * e.i]; a[3 * n + 1] = P[3 * e.i + 1]; a[3 * n + 2] = P[3 * e.i + 2]; });
     c.needsUpdate = true;
   }
+  // ------------------------------------------------------------------ debug: one-letter labels on the active objects (never on the passive dots)
+  // so an object can be named in a bug report ("object E looks flat"). Toggled with the Debug button or the I key; the legend is in the menu.
+  const DEBUG_KINDS = [
+    ['A', 'core membrane (outer shell, docking ripples)', '#ffb27a'], ['B', 'code sphere (Lean code on it)', '#ffd7a8'], ['C', 'nucleus (compile progress)', '#fff1c9'],
+    ['D', 'declaration satellite (orbits the core)', '#4fb0ff'], ['E', 'import bubble (cyan)', '#00ffff'], ['F', 'consumer bubble (magenta)', '#ff4de6'],
+    ['G', 'compiling / just built bubble', '#ff8a3d'], ['H', 'import fibre / tube', '#00d0d0'], ['I', 'consumer fibre / tube', '#d040c0'],
+    ['J', 'hair line (links beyond 192)', '#8fa3c8'], ['K', 'hand-over arc (selection change)', '#9fd8ff'], ['L', 'Main landmark (star, rings)', '#ffd36b'],
+    ['M', 'zeta zero on the critical line', '#fff0d0'], ['N', 'hover marker', '#ffd133'],
+  ];
+  const DEBUG = { bubbles: 24, sats: 10, imp: 6, con: 4, hair: 3, zeros: 3, size: 0.032 };
+  let dbgGroup = null; const dbgMats = {}, dbgPool = [];
+  function dbgMat(letter) {
+    if (dbgMats[letter]) return dbgMats[letter];
+    const col = (DEBUG_KINDS.find((k) => k[0] === letter) || [0, 0, '#fff'])[2], cv = document.createElement('canvas'); cv.width = cv.height = 64;
+    const x = cv.getContext('2d');
+    if (x) { x.fillStyle = 'rgba(6,10,20,.82)'; roundRect(x, 4, 4, 56, 56, 12); x.fill(); x.strokeStyle = col; x.lineWidth = 4; roundRect(x, 4, 4, 56, 56, 12); x.stroke();
+      x.fillStyle = col; x.font = `bold 40px ${SANS}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(letter, 32, 35); }
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+    return (dbgMats[letter] = new THREE.SpriteMaterial({ map: t, transparent: true, depthTest: false, depthWrite: false, sizeAttenuation: false, toneMapped: false }));
+  }
+  function toggleDebug() { S.debug = !S.debug; S.dbgPick = 0; if (dbgGroup) dbgGroup.visible = S.debug; if (panels.menu) panels.menu.dirty = true; }
+  /** the labels of this frame: [{ letter, p: Vector3 in world-local coordinates }] */
+  function debugLabels() {
+    const out = [], V = (x, y, z) => new THREE.Vector3(x, y, z), add = (letter, p) => out.push({ letter, p });
+    if (S.view !== 'tower') return out;
+    const c = core;
+    if (c && c.group.visible && c.target === 1) {
+      const g = c.group.position, s = c.group.scale.x;
+      add('A', V(g.x + CORE_R * s, g.y + 0.35 * CORE_R * s, g.z)); add('B', V(g.x, g.y + c.heart.scale.x * s * 1.2, g.z)); add('C', V(g.x - 0.6 * c.heart.scale.x * s, g.y, g.z));
+      for (let k = 0; k < Math.min(DEBUG.sats, c.orbit.length); k++) add('D', c.satPos[k].clone().multiplyScalar(s).add(g));
+    }
+    // bubbles: the ones nearest to the viewer (re-picked a few times per second)
+    const now = performance.now();
+    if (!S.dbgPick || now - S.dbgPick > 300) {
+      S.dbgPick = now; const cam = camEl.object3D.getWorldPosition(new THREE.Vector3()); world.worldToLocal(cam); const P = S.pos;
+      S.dbgNear = solidList.map((e) => ({ e, d: (P[3 * e.i] - cam.x) ** 2 + (P[3 * e.i + 1] - cam.y) ** 2 + (P[3 * e.i + 2] - cam.z) ** 2 })).sort((a, b) => a.d - b.d).slice(0, DEBUG.bubbles).map((x) => x.e);
+    }
+    for (const e of S.dbgNear || []) if (solidList.includes(e)) add(e.kind === 1 ? 'E' : e.kind === 2 ? 'F' : 'G', V(S.pos[3 * e.i], S.pos[3 * e.i + 1], S.pos[3 * e.i + 2]));
+    // connections: the middle of a few fibres / tubes of each kind, and of the first hair lines
+    const tubes = S.links === 'tubes', geo = tubes ? ribbons.geometry : fibers.geometry, per = tubes ? (RIB.segs + 1) * RIB.sides : (FIB.segs + 1) * 2;
+    const mid = tubes ? (RIB.segs / 2) * RIB.sides : (FIB.segs / 2) * 2, pa = geo.attributes.position.array; let ni = 0, nc = 0;
+    if (geo.drawRange.count > 0) (S.nearKinds || []).forEach((kind, k) => {
+      if (kind === 0 ? ni++ >= DEBUG.imp : nc++ >= DEBUG.con) return; const v = k * per + mid; add(kind === 0 ? 'H' : 'I', V(pa[3 * v], pa[3 * v + 1], pa[3 * v + 2]));
+    });
+    for (let k = 0; k < Math.min(DEBUG.hair, lines.geometry.drawRange.count / 2); k++) { const o = k * 6; add('J', V((linePos[o] + linePos[o + 3]) / 2, (linePos[o + 1] + linePos[o + 4]) / 2, (linePos[o + 2] + linePos[o + 5]) / 2)); }
+    if (link.dot && link.dot.visible) add('K', link.dot.position.clone());
+    if (beacon && beacon.group.visible) {
+      const b = beacon.group.position; add('L', V(b.x + 0.25, b.y + 0.25, b.z));
+      L.zeroHeights(L.ZETA_ZEROS).slice(0, DEBUG.zeros).forEach((h) => add('M', V(b.x + 0.06, b.y + ZERO.y0 + h * ZERO.span, b.z)));
+    }
+    if (hoverMark.visible) add('N', hoverMark.position.clone().add(V(0.1, 0.1, 0)));
+    return out;
+  }
+  function debugTick() {
+    if (!S.debug || !dbgGroup) return;
+    const labels = debugLabels();
+    while (dbgPool.length < labels.length) { const sp = new THREE.Sprite(dbgMat('A')); sp.center.set(-0.15, -0.15); sp.renderOrder = 999; sp.frustumCulled = false; dbgPool.push(sp); dbgGroup.add(sp); }
+    dbgPool.forEach((sp, k) => {
+      const l = labels[k]; sp.visible = !!l; if (!l) return;
+      sp.material = dbgMat(l.letter); sp.userData.letter = l.letter; sp.position.copy(l.p); const k2 = DEBUG.size / Math.max(world.scale.x, 1e-4); sp.scale.set(k2, k2, 1);   // constant on screen, also in the miniature
+    });
+  }
   const hideLinks = () => { lines.geometry.setDrawRange(0, 0); ribbons.geometry.setDrawRange(0, 0); fibers.geometry.setDrawRange(0, 0); for (const c of cores) c.shellMat.uniforms.uDockN.value = 0; };
   const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), tmpM = new THREE.Matrix4();
   const raycaster = new THREE.Raycaster();
@@ -1021,6 +1091,7 @@
     solids = new THREE.Mesh(sg, new THREE.ShaderMaterial({ vertexShader: SOLID_V, fragmentShader: SOLID_F, transparent: true, depthWrite: false, side: THREE.DoubleSide,
       uniforms: { uTime: pu.uTime, uSize: pu.uSize, uScale: pu.uScale, uHiA: pu.uHiA, uHiS: pu.uHiS, uWorldScale: { value: 1 }, uMinPx: { value: SOLID.minPx }, uWobble: { value: SOLID.wobble }, uTempo: { value: SOLID.tempo } } }));
     solids.frustumCulled = false; solids.renderOrder = 1; world.add(solids);
+    dbgGroup = new THREE.Group(); dbgGroup.visible = !!S.debug; world.add(dbgGroup);
 
     // packets cloud
     const np = S.meta.packets;
@@ -1087,7 +1158,7 @@
       p.mesh.position.set(R * Math.sin(t), y, -R * Math.cos(t)); p.mesh.rotation.set(rx || 0, -t, 0, 'YXZ');
       panelsEl.object3D.add(p.mesh); return p;
     };
-    mk('menu', 0.62, 0.9, 900, 1300, paintMenu, -38, 1.4);
+    mk('menu', 0.62, 0.962, 900, 1390, paintMenu, -38, 1.4);      // 1390 px: room for the Debug row and its legend
     mk('log', 1.5, 1.007, 1400, 940, paintLog, 0, 1.5);        // centre and the widest: it is the part that moves
     mk('source', 1.2, 0.883, 1400, 1030, paintSource, 45, 1.45);
     mk('info', 0.8, 0.41, 900, 460, paintInfo, 0, 0.72, -0.4, 1.6);
@@ -1270,6 +1341,7 @@
     nb.sort((u, v) => u.d - v.d);
     // the nearest RIB.max become fibres (or tubes, K) ...
     const start = RIB.start * (i === mainIdx ? CROWN_SCALE : 1), near = nb.slice(0, RIB.max).map((e) => ({ a: [ax, ay, az], b: [P[3 * e.j], P[3 * e.j + 1], P[3 * e.j + 2]], kind: e.kind, phase: ((e.j * 2654435761) >>> 0) / 4294967296 }));
+    S.nearKinds = near.map((e) => e.kind);
     for (const c of cores) c.shellMat.uniforms.uDockN.value = 0;
     ribbons.geometry.setDrawRange(0, 0); fibers.geometry.setDrawRange(0, 0);
     if (S.links === 'tubes') {
@@ -1590,6 +1662,7 @@
       if (e.code === 'KeyK') cycleLinks();                            // connection style: fibres / tubes
       if (e.code === 'KeyG') cycleGlow();                             // glow off / on / all
       if (e.code === 'KeyN') toggleSound();                           // sound on / off
+      if (e.code === 'KeyI') toggleDebug();                           // debug: one-letter labels on the active objects
       if (e.code === 'KeyX') toggleFollow();                          // follow live           (VR: X)
       if (e.code === 'KeyR') recenter();                              // panels in front of me (VR: A; on a keyboard A is "move left")
     });
@@ -1648,7 +1721,7 @@
     }
     ribbons.material.uniforms.uTime.value = t / 1000; ribbons.material.uniforms.uWorldScale.value = world.scale.x;
     fibers.material.uniforms.uTime.value = t / 1000; fibers.material.uniforms.uWorldScale.value = world.scale.x; for (const c of cores) c.shellMat.uniforms.uDockT.value = t / 1000;
-    morphTick(dt); grabTick(); coreTick(t, dt); beaconTick(t, dt);
+    morphTick(dt); grabTick(); coreTick(t, dt); beaconTick(t, dt); debugTick();
     // adaptive quality: in VR, if frames stay slow (< ~42 fps) for 3 s, take the glow down one level (the saved choice is untouched; G raises it again)
     if (dtMs > 0 && dtMs < 500) {
       S.frameMs = S.frameMs ? S.frameMs * 0.9 + dtMs * 0.1 : dtMs;
@@ -1667,7 +1740,7 @@
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
     const el = $('loading'); if (el) el.remove();
-    window.RH = { FOV_MIN, FOV_MAX, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, link, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
+    window.RH = { FOV_MIN, FOV_MAX, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, link, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }
   boot();
 })();

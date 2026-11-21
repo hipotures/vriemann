@@ -661,6 +661,30 @@ load('lib.js'); load('audio.js'); load('app.js');
     const varyings = (s) => [...s.matchAll(/varying\s+(?:float|vec3)\s+([^;]+);/g)].flatMap((m) => m[1].split(',').map((x) => x.trim())).sort();
     assert.deepStrictEqual(varyings(v), varyings(f), 'bubble shaders: same varyings'); assert.deepStrictEqual(varyings(ptsMat.vertexShader), varyings(src), 'dot shaders: same varyings');
   });
+  await t('debug: one-letter labels only on active objects (core parts, satellites, bubbles, links, Main), toggled by button / I, legend in the menu', async () => {
+    const { panels } = RH, press = (code) => winL.keydown.forEach((f) => f({ code }));
+    setView('tower'); S.closureOn = true; if (S.links !== 'fibers') RH.cycleLinks();
+    const i = S.depth.indexOf(120); RH.select(i); frame(16, 30);
+    for (const k in panels) panels[k].dirty = true; frame();
+    assert(panels.menu.buttons.find((b) => b.label === 'Debug: off'), 'menu has the Debug button');
+    assert.strictEqual(RH.dbgGroup().visible, false); frame(); assert.strictEqual(RH.dbgGroup().children.filter((x) => x.visible).length, 0, 'no labels while off');
+    press('KeyI'); assert(S.debug && RH.dbgGroup().visible); frame(); frame();
+    assert(panels.menu.buttons.find((b) => b.label === 'Debug: on'), 'button shows the state');
+    const labels = RH.debugLabels(), letters = new Set(labels.map((l) => l.letter));
+    for (const need of ['A', 'B', 'C', 'H']) assert(letters.has(need), 'missing label ' + need + ' in ' + [...letters].join(''));
+    assert(letters.has('E') || letters.has('F'), 'connected bubbles are labelled');
+    if (RH.core().orbit.length) assert(letters.has('D'), 'satellites labelled');
+    // passive dots are never labelled: every bubble label sits exactly on a bubble module
+    const solid = new Set(RH.solidList().map((e) => S.pos[3 * e.i] + ',' + S.pos[3 * e.i + 1] + ',' + S.pos[3 * e.i + 2]));
+    for (const l of labels.filter((x) => 'EFG'.includes(x.letter))) assert(solid.has(l.p.x + ',' + l.p.y + ',' + l.p.z), 'bubble label not on a bubble');
+    assert(labels.filter((x) => 'EFG'.includes(x.letter)).length <= 24 && labels.length < 80, 'label count stays small: ' + labels.length);
+    const shown = RH.dbgGroup().children.filter((x) => x.visible);
+    assert.strictEqual(shown.length, labels.length, 'one sprite per label'); assert(shown.every((x) => x.material.depthTest === false && x.material.sizeAttenuation === false), 'labels always readable, constant size');
+    assert.deepStrictEqual(shown.map((x) => x.userData.letter).sort(), labels.map((x) => x.letter).sort());
+    const L2 = RH.DEBUG_KINDS.map((k) => k[0]); assert.strictEqual(new Set(L2).size, L2.length, 'letters are unique');
+    setView('packets'); assert.strictEqual(RH.debugLabels().length, 0, 'packets view: no labels'); setView('tower');
+    press('KeyI'); assert(!S.debug && !RH.dbgGroup().visible, 'I again hides them');
+  });
   await t('module core is a lit, layered sphere (plasma shader + nucleus inside), animated by state/energy, fading with the crossfade', () => {
     setView('tower'); RH.select(S.depth.indexOf(33)); frame(16, 60); const c = RH.core();
     assert(c.heart.material.isShaderMaterial && c.nucleus.material.isShaderMaterial, 'the core must not be a flat basic material'); assert(c.heart.material.transparent && c.nucleus.scale.x < c.heart.scale.x, 'nucleus sits inside the core');

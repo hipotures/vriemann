@@ -14,7 +14,7 @@ A-Frame 1.7.0 (three.js r173) is vendored in `vendor/` – no CDN.
 
 ## Controls
 Desktop: drag = look around, WASD = move, Q/E = elevator (depth), click = select / press a button, wheel over the code = scroll (in the miniature: size),
-**B or M** = tower ⇄ miniature, **X** = follow live (off → camera → in place), **H or Y** = hide/show the UI, **R** = panels in front of me (A is "left", so recenter is R). **K** = connection style (fibres / tubes), **+ / −** or Shift+wheel = zoom (0 = reset).
+**B or M** = tower ⇄ miniature, **X** = follow live (off → camera → in place), **H or Y** = hide/show the UI, **R** = panels in front of me (A is "left", so recenter is R). **K** = connection style (fibres / tubes), **I** = debug letters, **+ / −** or Shift+wheel = zoom (0 = reset).
 VR (Touch controllers): trigger = select / button, left stick ▲▼ = elevator, right stick ◀▶ = rotate the world, right stick ▲▼ over the code = scroll,
 A = put the panels in front of me, B = tower ⇄ miniature on a table, X = follow live, Y = hide/show the panels.
 
@@ -80,6 +80,29 @@ selection) and the **compiling** ones are instead real 3D **soap bubbles**: inst
 three axes (volume kept). They have real depth, so a controller cuts them like solid objects. Smooth spheres (24×16), up to `SOLID.max` = 4,000 at once (compiling ones first, then the connected nearest to the
 selection); beyond that the rest stay plain dots. Each bubble has its own tempo and phase (shape periods ~5–16 s, compiling ones beat every ~2–3.5 s), so they never pulse in step. Tune them with `SOLID` in `app.js` (`max`, `segs`, `rings`, `minPx`, `wobble`, `tempo`).
 The "Packets" view = 2,858 packets as spheres (colour = % built). "Follow live" (X) cycles off → **camera** (selects the module that has been compiling the longest and takes you there: elevator + turning the tower) → **in place** (the scene stays still, only the selection moves: each new module gets its core, links and code where it is) → off. A manual selection turns follow off.
+
+## Debug letters
+The **Debug** button in the menu (or **I**) puts a one-letter label next to each kind of active object, so you can say "object E looks wrong".
+The passive dots (open / assigned / built modules not connected to the selection) are never labelled. With debug on, the menu shows the legend:
+
+| Letter | Object |
+|---|---|
+| A | core membrane (outer shell, docking ripples) |
+| B | code sphere (Lean code on it) |
+| C | nucleus (compile progress) |
+| D | declaration satellite (orbits the core) |
+| E | import bubble (cyan) |
+| F | consumer bubble (magenta) |
+| G | compiling / just built bubble |
+| H | import fibre / tube |
+| I | consumer fibre / tube |
+| J | hair line (links beyond 192) |
+| K | hand-over arc (selection change) |
+| L | Main landmark (star, rings) |
+| M | zeta zero on the critical line |
+| N | hover marker |
+
+Only a few of each are labelled (the 24 bubbles nearest to you, 10 satellites, 6 import and 4 consumer links, 3 zeros); tune it with `DEBUG` in `app.js`.
 
 ## Tests
     node tests/test_lib.js                                   # logic on the real data
