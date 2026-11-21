@@ -215,6 +215,49 @@
     return { pos, nrm, t, dir, phase, kind, index, vertexCount: V, indexCount: I };
   }
 
+  /**
+   * Geometry for glowing connection fibres (the default link style).  Same edges as buildTubes.  Each edge is a CUBIC Bezier that leaves the
+   * selected module's core radially (P0 on the core surface, direction = towards the neighbour, pushed outwards from the tower axis and fanned
+   * around by the edge's phase, so a module with many connections sprouts them like a dandelion instead of one bundle) and then curves into
+   * the neighbour.  Every sample gets two vertices (side -1 / +1) that the vertex shader spreads across the view (camera-facing ribbon with a
+   * Gaussian profile = no hard, aliased edge).  Also returns dock[] = the unit direction each edge leaves the core in (for the ripples
+   * on the core's membrane where imports arrive).
+   */
+  function buildFibers(edges, segs, start) {
+    const nPts = segs + 1, vPer = nPts * 2, V = edges.length * vPer, I = edges.length * segs * 6;
+    const pos = new Float32Array(V * 3), tan = new Float32Array(V * 3), side = new Float32Array(V), t = new Float32Array(V),
+      dir = new Float32Array(V), phase = new Float32Array(V), kind = new Float32Array(V), index = new Uint32Array(I), dock = [];
+    start = start || 0;
+    const norm = (x, y, z, fx, fy, fz) => { const l = Math.hypot(x, y, z); return l > 1e-9 ? [x / l, y / l, z / l] : [fx, fy, fz]; };
+    edges.forEach((e, k) => {
+      const [ax, ay, az] = e.a, [bx, by, bz] = e.b, len = Math.hypot(bx - ax, by - ay, bz - az);
+      const [ux, uy, uz] = norm(bx - ax, by - ay, bz - az, 0, 1, 0);
+      const [ox, , oz] = norm((ax + bx) / 2, 0, (az + bz) / 2, 1, 0, 0);
+      let [e1x, e1y, e1z] = norm(uy * 0 - uz * 1, uz * 0 - ux * 0, ux * 1 - uy * 0, 1, 0, 0);       // u x up
+      if (Math.abs(uy) > 0.98) [e1x, e1y, e1z] = [1, 0, 0];
+      const e2x = uy * e1z - uz * e1y, e2y = uz * e1x - ux * e1z, e2z = ux * e1y - uy * e1x;
+      const ang = 2 * Math.PI * e.phase, j1 = 0.35 * Math.cos(ang), j2 = 0.35 * Math.sin(ang);
+      const [dx, dy, dz] = norm(ux + 0.45 * ox + j1 * e1x + j2 * e2x, uy + j1 * e1y + j2 * e2y, uz + 0.45 * oz + j1 * e1z + j2 * e2z, ux, uy, uz);
+      dock.push([dx, dy, dz]);
+      const s0 = Math.min(start, 0.45 * len), bow = Math.min(1.2, 0.2 * len);
+      const p0 = [ax + dx * s0, ay + dy * s0, az + dz * s0], p1 = [p0[0] + dx * 0.4 * len, p0[1] + dy * 0.4 * len, p0[2] + dz * 0.4 * len];
+      const p2 = [bx - ux * 0.3 * len + ox * bow, by - uy * 0.3 * len, bz - uz * 0.3 * len + oz * bow], p3 = [bx, by, bz], base = k * vPer;
+      for (let s = 0; s <= segs; s++) {
+        const q = s / segs, r = 1 - q, w0 = r * r * r, w1 = 3 * r * r * q, w2 = 3 * r * q * q, w3 = q * q * q;
+        const d0 = -3 * r * r, d1 = 3 * r * r - 6 * r * q, d2 = 6 * r * q - 3 * q * q, d3 = 3 * q * q;
+        const P = [0, 1, 2].map((c) => w0 * p0[c] + w1 * p1[c] + w2 * p2[c] + w3 * p3[c]);
+        const T = norm(...[0, 1, 2].map((c) => d0 * p0[c] + d1 * p1[c] + d2 * p2[c] + d3 * p3[c]), ux, uy, uz);
+        for (let sd = 0; sd < 2; sd++) {
+          const v = base + s * 2 + sd;
+          pos[3 * v] = P[0]; pos[3 * v + 1] = P[1]; pos[3 * v + 2] = P[2]; tan[3 * v] = T[0]; tan[3 * v + 1] = T[1]; tan[3 * v + 2] = T[2];
+          side[v] = sd ? 1 : -1; t[v] = q; dir[v] = e.kind === 0 ? -1 : 1; phase[v] = e.phase; kind[v] = e.kind;
+        }
+      }
+      for (let s = 0; s < segs; s++) { const v0 = base + s * 2, o = (k * segs + s) * 6; index[o] = v0; index[o + 1] = v0 + 1; index[o + 2] = v0 + 2; index[o + 3] = v0 + 1; index[o + 4] = v0 + 3; index[o + 5] = v0 + 2; }
+    });
+    return { pos, tan, side, t, dir, phase, kind, index, dock, vertexCount: V, indexCount: I };
+  }
+
   /** angle wrapped to (-PI, PI] */
   const wrapPi = (a) => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
 
@@ -295,6 +338,6 @@
   const fmt = (x) => String(Math.round(x)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const pct = (a, b) => (b ? (100 * a / b).toFixed(1) : '0.0') + '%';
 
-  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, buildTubes, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
+  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, buildTubes, buildFibers, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.RHLib = api;
 })(typeof self !== 'undefined' ? self : this);

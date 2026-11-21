@@ -233,6 +233,27 @@ t('buildTubes: counts, start on the core surface, exact far end, unit normals pe
   const Z = L.buildTubes([{ a: [0, 0, 0], b: [0, 5, 0], kind: 0, phase: 0 }], 8, 6, 0.2); assert([...Z.pos, ...Z.nrm].every(Number.isFinite));
   assert.strictEqual(L.buildTubes(E, S, K).pos[0], 5, 'no start offset by default');
 });
+t('buildFibers: counts, start on the core surface, exact far end, leaves the core radially and fanned out, smooth cubic arc, flow by kind, degenerate edges', () => {
+  const E = [ { a: [5, 1, 0], b: [0, 6, 5], kind: 0, phase: 0.25 }, { a: [5, 1, 0], b: [-5, 3, 1], kind: 1, phase: 0.75 }, { a: [5, 1, 0], b: [5.1, 1, 0], kind: 0, phase: 0.5 }, { a: [5, 1, 0], b: [5, 1, 0], kind: 1, phase: 0 } ];
+  const S = 32, ST = 0.22, R = L.buildFibers(E, S, ST), per = (S + 1) * 2;
+  assert.strictEqual(R.vertexCount, E.length * per); assert.strictEqual(R.indexCount, E.length * S * 6); assert.strictEqual(R.dock.length, E.length);
+  for (const k of ['pos', 'tan', 'side', 't', 'dir', 'phase', 'kind']) assert([...R[k]].every(Number.isFinite), k + ' has NaN/Inf');
+  assert(R.index.every((v) => v < R.vertexCount)); assert(R.dock.flat().every(Number.isFinite));
+  const P = (v) => [R.pos[3 * v], R.pos[3 * v + 1], R.pos[3 * v + 2]], sub = (p, q) => p.map((x, i) => x - q[i]), len = (p) => Math.hypot(...p), dot = (p, q) => p[0] * q[0] + p[1] * q[1] + p[2] * q[2];
+  E.forEach((e, k) => {
+    const v0 = k * per, vN = v0 + per - 2, el = len(sub(e.b, e.a));
+    assert(Math.abs(len(sub(P(v0), e.a)) - Math.min(ST, 0.45 * el)) < 1e-5, 'fibre ' + k + ' starts on the core surface');
+    assert(len(sub(P(vN), e.b)) < 1e-5, 'fibre ' + k + ' ends exactly at the neighbour');
+    assert(Math.abs(len(R.dock[k]) - 1) < 1e-6, 'dock direction is a unit vector');
+    if (el > 1e-6) { const st = sub(P(v0), e.a); assert(dot(st, R.dock[k]) / len(st) > 0.999, 'it leaves the core along its dock direction'); assert(dot(R.dock[k], sub(e.b, e.a)) / el > 0.5, 'roughly towards the neighbour'); }
+    for (let s = 0; s <= S; s++) { const v = v0 + 2 * s; assert.deepStrictEqual(P(v), P(v + 1)); assert.strictEqual(R.side[v] + R.side[v + 1], 0); assert(Math.abs(len([R.tan[3 * v], R.tan[3 * v + 1], R.tan[3 * v + 2]]) - 1) < 1e-6); assert.strictEqual(R.dir[v], e.kind === 0 ? -1 : 1); }
+    if (el > 1) for (let s = 0; s < S; s++) { const a = 3 * (v0 + 2 * s), b = 3 * (v0 + 2 * s + 2); assert(R.tan[a] * R.tan[b] + R.tan[a + 1] * R.tan[b + 1] + R.tan[a + 2] * R.tan[b + 2] > 0.95, 'kink in fibre ' + k + ' at ' + s); }
+  });
+  // many edges to the SAME neighbour direction: the phase fans them out (no single bundle leaving the core)
+  const fan = L.buildFibers(Array.from({ length: 8 }, (_, k) => ({ a: [5, 1, 0], b: [0, 6, 5], kind: 0, phase: k / 8 })), 8, ST).dock;
+  let minDot = 1; for (let x = 0; x < 8; x++) for (let y = x + 1; y < 8; y++) minDot = Math.min(minDot, dot(fan[x], fan[y])); assert(minDot < 0.9, 'fan-out: ' + minDot);
+  const Z = L.buildFibers([{ a: [0, 0, 0], b: [0, 5, 0], kind: 0, phase: 0.3 }], 8, 0.2); assert([...Z.pos, ...Z.tan].every(Number.isFinite));
+});
 t('packetStats + colour helpers', () => {
   const st = new Uint8Array(n).map((_, i) => i % 4); const pk = new Uint16Array(fs.readFileSync(path.join(D, 'packet.u16')).buffer.slice(0));
   const ps = L.packetStats(n, pk, st, meta.packets);

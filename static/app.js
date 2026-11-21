@@ -9,7 +9,7 @@
 
   // ------------------------------------------------------------------ state
   const S = {
-    layout: 'tower', layoutTarget: 'tower', layouts: {}, layoutLoading: false, layoutError: '', morph: null, glow: 1, fov: 80, bringPrev: null, glowAuto: false, frameMs: 0, slowMs: 0, yawTarget: null, ys: { v: 0 }, decls: [], hoverSat: -1, hand: 'right', scale: 0.08, grab: null, uiHidden: false, followTarget: -1, fs: { v: 0 }, nodeDist: { right: null, left: null }, lastNodeDist: null,
+    layout: 'tower', links: 'fibers', layoutTarget: 'tower', layouts: {}, layoutLoading: false, layoutError: '', morph: null, glow: 1, fov: 80, bringPrev: null, glowAuto: false, frameMs: 0, slowMs: 0, yawTarget: null, ys: { v: 0 }, decls: [], hoverSat: -1, hand: 'right', scale: 0.08, grab: null, uiHidden: false, followTarget: -1, fs: { v: 0 }, nodeDist: { right: null, left: null }, lastNodeDist: null,
     n: 0, meta: null, pos: null, depth: null, ns: null, pk: null, ids: null, names: null, nameIdx: null,
     csr: null, st: null, stF: null, hiF: null,
     view: 'tower', color: 0, hideOpen: false, closureOn: true, closureOnly: false, follow: false, mini: false,
@@ -25,6 +25,7 @@
   const saveVolume = (v) => { try { localStorage.setItem('rh.volume', String(v)); } catch (e) { /* private window */ } };
   // ------------------------------------------------------------------ glow: 0 off, 1 halo on built/active dots, 2 also a faint halo on open ones
   const GLOW = { strength: 0.22, open: 0.08, scale: 2.4, pk: 0.8 };
+  const loadLinks = () => { try { const v = localStorage.getItem('rh.links'); return v === 'tubes' || v === 'fibers' ? v : null; } catch (e) { return null; } };
   const loadGlow = () => { try { const v = parseInt(localStorage.getItem('rh.glow'), 10); return v >= 0 && v <= 2 ? v : null; } catch (e) { return null; } };
   function applyGlow() {
     if (!ptsHalo) return;
@@ -321,9 +322,10 @@
     p.button(c, 40, y + 12, 260, 64, S.mini ? 'Inside' : 'Miniature', toggleMini, S.mini);
     p.button(c, 320, y + 12, 260, 64, 'Recenter', recenter, false);
     p.button(c, 600, y + 12, 260, 64, 'Main.lean', () => { const i = S.nameIdx.get('Main'); if (i != null) { stopFollow(); jumpTo(i); } }, false);
-    p.button(c, 40, y + 90, 260, 64, 'Size −', () => scaleMini(1 / 1.3), false);
-    p.button(c, 320, y + 90, 260, 64, 'Size +', () => scaleMini(1.3), false);
-    p.button(c, 600, y + 90, 260, 64, S.bringPrev ? 'Back' : 'Bring to me', bringToMe, !!S.bringPrev);
+    p.button(c, 40, y + 90, 190, 64, 'Size −', () => scaleMini(1 / 1.3), false);
+    p.button(c, 250, y + 90, 190, 64, 'Size +', () => scaleMini(1.3), false);
+    p.button(c, 460, y + 90, 190, 64, S.bringPrev ? 'Back' : 'Bring to me', bringToMe, !!S.bringPrev);
+    p.button(c, 670, y + 90, 190, 64, S.links === 'tubes' ? 'Links: tubes' : 'Links: fibres', cycleLinks, S.links === 'tubes');
     const snd = sound ? sound.state() : { on: false, volume: 0 };
     const blocked = snd.on && !snd.running;
     p.button(c, 40, y + 168, 190, 64, !snd.on ? 'Sound: off' : blocked ? 'Sound: tap' : 'Sound: on', blocked ? unlockSound : toggleSound, snd.on);
@@ -391,6 +393,51 @@
       float fade = mix(1., .5, vT);                                            // brighter at the module, darker towards the far end
       vec3 col = base*(.18 + .82*diff)*fade + vec3(.55*spec) + base*.35*rim + (base*1.3 + vec3(.5))*pulse*(.35 + .65*facing);
       gl_FragColor = vec4(col, 1.);
+    }`;
+
+  // ---- connection fibres (the default style, K switches to the tubes above): faint additive light-guides along cubic arcs that leave the core
+  //      radially, with comets (bright head + short tail) running the way knowledge flows.  Imports (cyan): dense, fast comets flowing INTO
+  //      the core, each arrival makes a ripple on the core's membrane.  Consumers (magenta): thin, dim, dashed threads with a rare slow wave
+  //      going OUT.  Additive blending: where many overlap they add up to a glowing trunk instead of a solid wall; the Gaussian profile across the
+  //      camera-facing ribbon means no hard (aliased) edge.  Fibres fade at both ends (they "dock" on the membrane) and with camera distance.
+  const FIB = { segs: 32, width: 0.030, minPx: 2.5, speed: 0.30, freq: 2.0, conSpeed: 0.10, docks: 16 };
+  const FIB_V = `
+    attribute vec3 aTan; attribute float aSide, aT, aDir, aPhase, aKind;
+    uniform float uWidth, uMinPx, uWorldScale;
+    varying float vSide, vT, vDir, vPhase, vKind, vFar;
+    void main(){
+      vec4 mv = modelViewMatrix*vec4(position, 1.);
+      vec3 tv = normalize(mat3(modelViewMatrix)*aTan);
+      vec3 sv = cross(tv, normalize(mv.xyz)); float sl = length(sv); sv = sl > 1e-4 ? sv/sl : vec3(1., 0., 0.);   // across the fibre, facing the eye
+      float w = max(uWidth*uWorldScale*(aKind > .5 ? .5 : 1.), uMinPx*max(-mv.z, .05)/(projectionMatrix[1][1]*500.));
+      mv.xyz += sv*aSide*w;
+      vSide = aSide; vT = aT; vDir = aDir; vPhase = aPhase; vKind = aKind; vFar = smoothstep(6., 30., -mv.z/max(uWorldScale, .01));
+      gl_Position = projectionMatrix*mv;
+    }`;
+  const FIB_F = `
+    uniform float uTime, uSpeed, uFreq, uConSpeed;
+    varying float vSide, vT, vDir, vPhase, vKind, vFar;
+    void main(){
+      float s2 = vSide*vSide;
+      float core = exp(-s2*14.), halo = exp(-s2*3.)*.45, edge = 1. - smoothstep(.75, 1., abs(vSide));
+      float ends = smoothstep(0., .06, vT)*(1. - smoothstep(.94, 1., vT));
+      float f = vDir < 0. ? 1. - vT : vT;                                     // position along the flow (0 = where it comes from)
+      float spd = .75 + .5*fract(vPhase*7.31);                               // every fibre has its own pace (no wallpaper sync)
+      vec3 col; float I;
+      if (vKind < .5) {
+        vec3 base = vec3(0., .92, 1.);
+        float h = fract(uTime*uSpeed*spd + vPhase), d = fract((h - f)*uFreq)/uFreq;       // distance behind the nearest comet head
+        float head = exp(-d*90.), tail = exp(-d*10.)*.6;
+        I = .10 + 1.8*head + tail;
+        col = mix(base, vec3(1.), head*core)*I;
+      } else {
+        vec3 base = vec3(1., .35, .90);
+        float x = fract(vT*22. - uTime*.35), dash = smoothstep(.15, .3, x)*(1. - smoothstep(.6, .75, x));
+        float h = fract(uTime*uConSpeed*spd + vPhase), d = fract(h - f), wave = exp(-d*30.);
+        I = .14*dash + .9*wave;
+        col = mix(base, vec3(1.), wave*core*.6)*I;
+      }
+      gl_FragColor = vec4(col*(core + halo)*edge*ends*(1. - .7*vFar), 1.);
     }`;
 
   // ---- info panel
@@ -548,6 +595,7 @@
     void main(){ vPos = normalize(position); vec4 wp = modelMatrix*vec4(position,1.); vNw = normalize(mat3(modelMatrix)*normal);
       vVw = cameraPosition - wp.xyz; gl_Position = projectionMatrix*viewMatrix*wp; }`;
   const SHELL_F = `uniform float uTime, uEnergy, uSpeed, uStreaks, uAlpha; uniform vec3 uColor;
+    uniform vec3 uDock[16]; uniform float uDockPh[16]; uniform float uDockN, uDockT, uDockSpd, uDockFreq;
     varying vec3 vPos; varying vec3 vNw; varying vec3 vVw;
     void main(){
       vec3 n = normalize(vPos);
@@ -567,8 +615,15 @@
         float ring = 1. - smoothstep(0., .07, onCircle);   // (edge0 < edge1: reversed edges are undefined in GLSL)
         streak += ring*(exp(-acos(clamp(dot(n, head), -1., 1.))*9.) + .5*exp(-acos(clamp(dot(n, tail), -1., 1.))*5.));
       }
-      vec3 col = uColor*(.30 + .35*bands) + vec3(1.)*streak + uColor*fres*1.3;
-      float alpha = .16 + .55*fres + .30*bands*uEnergy + streak*.9;
+      float rip = 0.;                                                       // ripples where import fibres dock (comet arrivals)
+      for (int k = 0; k < 16; k++) {
+        if (float(k) >= uDockN) break;
+        float ang = acos(clamp(dot(n, uDock[k]), -1., 1.)), ph = uDockPh[k];
+        float age = fract(fract(uDockT*uDockSpd*(.75 + .5*fract(ph*7.31)) + ph)*uDockFreq);
+        rip += exp(-pow((ang - .12 - age*.8)*16., 2.))*(1. - age)*(1. - age) + exp(-ang*14.)*exp(-age*9.);
+      }
+      vec3 col = uColor*(.30 + .35*bands) + vec3(1.)*streak + uColor*fres*1.3 + vec3(.55, .95, 1.)*rip;
+      float alpha = .16 + .55*fres + .30*bands*uEnergy + streak*.9 + rip*.8;
       gl_FragColor = vec4(col, clamp(alpha, 0., .95)*uAlpha);
     }`;
   // core: translucent lit sphere with swirling plasma cells (cheap sin-noise), Fresnel rim, and a smaller nucleus inside it for parallax
@@ -655,7 +710,8 @@
     const group = new THREE.Group(); group.visible = false;
     const shellMat = new THREE.ShaderMaterial({
       vertexShader: SHELL_V, fragmentShader: SHELL_F, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-      uniforms: { uTime: { value: 0 }, uEnergy: { value: 0.12 }, uSpeed: { value: 0.3 }, uStreaks: { value: 3 }, uAlpha: { value: 0 }, uColor: { value: new THREE.Color(0x40d973) } },
+      uniforms: { uTime: { value: 0 }, uEnergy: { value: 0.12 }, uSpeed: { value: 0.3 }, uStreaks: { value: 3 }, uAlpha: { value: 0 }, uColor: { value: new THREE.Color(0x40d973) },
+        uDock: { value: Array.from({ length: 16 }, () => new THREE.Vector3(0, 1, 0)) }, uDockPh: { value: new Float32Array(16) }, uDockN: { value: 0 }, uDockT: { value: 0 }, uDockSpd: { value: FIB.speed }, uDockFreq: { value: FIB.freq } },
     });
     const shell = new THREE.Mesh(new THREE.SphereGeometry(CORE_R, 48, 32), shellMat);
     const heart = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 20), makeHeartMat(0));
@@ -841,8 +897,8 @@
   const rulers = [];
   let rulerInward = null;
   let ptsHalo = null, pkHalo = null;
-  let world, panelsEl, camEl, ptsMat, pts, pkPts, pkMat, hoverMark, selMark, lines, linePos, lineCol, ribbons;
-  const hideLinks = () => { lines.geometry.setDrawRange(0, 0); ribbons.geometry.setDrawRange(0, 0); };
+  let world, panelsEl, camEl, ptsMat, pts, pkPts, pkMat, hoverMark, selMark, lines, linePos, lineCol, ribbons, fibers;
+  const hideLinks = () => { lines.geometry.setDrawRange(0, 0); ribbons.geometry.setDrawRange(0, 0); fibers.geometry.setDrawRange(0, 0); for (const c of cores) c.shellMat.uniforms.uDockN.value = 0; };
   const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), tmpM = new THREE.Matrix4();
   const raycaster = new THREE.Raycaster();
 
@@ -909,6 +965,13 @@
     ribbons = new THREE.Mesh(rg, new THREE.ShaderMaterial({ vertexShader: RIB_V, fragmentShader: RIB_F, side: THREE.FrontSide,      // opaque + depth: tubes hide each other = 3D
       uniforms: { uTime: { value: 0 }, uWidth: { value: RIB.width }, uMinPx: { value: RIB.minPx }, uWorldScale: { value: 1 }, uSpeed: { value: RIB.speed }, uFreq: { value: RIB.freq } } }));
     ribbons.frustumCulled = false; ribbons.renderOrder = 1; world.add(ribbons);
+    const FV = RIB.max * (FIB.segs + 1) * 2, FI = RIB.max * FIB.segs * 6, fg = new THREE.BufferGeometry();
+    for (const [name, size] of [['position', 3], ['aTan', 3], ['aSide', 1], ['aT', 1], ['aDir', 1], ['aPhase', 1], ['aKind', 1]]) fg.setAttribute(name, new THREE.BufferAttribute(new Float32Array(FV * size), size).setUsage(THREE.DynamicDrawUsage));
+    fg.setIndex(new THREE.BufferAttribute(new Uint32Array(FI), 1).setUsage(THREE.DynamicDrawUsage)); fg.setDrawRange(0, 0);
+    fibers = new THREE.Mesh(fg, new THREE.ShaderMaterial({ vertexShader: FIB_V, fragmentShader: FIB_F, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { uTime: { value: 0 }, uWidth: { value: FIB.width }, uMinPx: { value: FIB.minPx }, uWorldScale: { value: 1 }, uSpeed: { value: FIB.speed }, uFreq: { value: FIB.freq }, uConSpeed: { value: FIB.conSpeed } } }));
+    fibers.frustumCulled = false; fibers.renderOrder = 2; world.add(fibers);
+    { const v = loadLinks(); if (v) S.links = v; }
 
     // depth rulers (re-oriented in updateRulers() depending on which side of the ring the viewer is)
     for (let d = 0; d <= maxD; d += 25) for (let a = 0; a < 4; a++) {
@@ -953,7 +1016,7 @@
   }
   function setView(v) {
     S.view = v; pts.visible = v === 'tower'; pkPts.visible = v === 'packets'; applyGlow();
-    S.hover = -1; S.hoverPk = -1; hoverMark.visible = false; lines.visible = ribbons.visible = v === 'tower';
+    S.hover = -1; S.hoverPk = -1; hoverMark.visible = false; lines.visible = ribbons.visible = fibers.visible = v === 'tower';
     panels.menu.dirty = panels.info.dirty = true;
   }
   function setColor(m) { S.color = m; applyUniforms(); panels.menu.dirty = true; }
@@ -1075,6 +1138,18 @@
   }
 
   // ------------------------------------------------------------------ selection
+  let pendingDocks = [];
+  function setDocks(c, docks) {
+    if (!c) return; const u = c.shellMat.uniforms;
+    docks.forEach((x, k) => { u.uDock.value[k].set(x.d[0], x.d[1], x.d[2]); u.uDockPh.value[k] = x.ph; });
+    u.uDockN.value = docks.length;
+  }
+  function cycleLinks() {
+    S.links = S.links === 'tubes' ? 'fibers' : 'tubes';
+    try { localStorage.setItem('rh.links', S.links); } catch (e) { /* private window */ }
+    if (S.sel >= 0 && S.morph == null) select(S.sel, true);
+    panels.menu.dirty = true;
+  }
   function firstOfPacket(k) { for (let i = 0; i < S.n; i++) if (S.pk[i] === k) return i; return -1; }
   function clearSel() {
     S.sel = -1; S.selPk = -1; S.hiF.fill(0); pts.geometry.attributes.aHi.needsUpdate = true;
@@ -1096,10 +1171,20 @@
     for (let k = c.impStart[i]; k < c.impStart[i + 1]; k++) { const j = c.impList[k]; nb.push({ j, kind: 0, d: Math.hypot(P[3 * j] - ax, P[3 * j + 1] - ay, P[3 * j + 2] - az) }); }
     for (let k = c.conStart[i]; k < c.conStart[i + 1]; k++) { const j = c.conList[k]; S.hiF[j] = 2; nb.push({ j, kind: 1, d: Math.hypot(P[3 * j] - ax, P[3 * j + 1] - ay, P[3 * j + 2] - az) }); }
     nb.sort((u, v) => u.d - v.d);
-    // the nearest ones become ribbons ...
-    const R = L.buildTubes(nb.slice(0, RIB.max).map((e) => ({ a: [ax, ay, az], b: [P[3 * e.j], P[3 * e.j + 1], P[3 * e.j + 2]], kind: e.kind, phase: ((e.j * 2654435761) >>> 0) / 4294967296 })), RIB.segs, RIB.sides, RIB.start);
-    const ra = ribbons.geometry.attributes; ra.position.array.set(R.pos); ra.aNrm.array.set(R.nrm); ra.aT.array.set(R.t); ra.aDir.array.set(R.dir); ra.aPhase.array.set(R.phase); ra.aKind.array.set(R.kind);
-    ribbons.geometry.index.array.set(R.index); for (const k in ra) ra[k].needsUpdate = true; ribbons.geometry.index.needsUpdate = true; ribbons.geometry.setDrawRange(0, R.indexCount);
+    // the nearest RIB.max become fibres (or tubes, K) ...
+    const start = RIB.start * (i === mainIdx ? CROWN_SCALE : 1), near = nb.slice(0, RIB.max).map((e) => ({ a: [ax, ay, az], b: [P[3 * e.j], P[3 * e.j + 1], P[3 * e.j + 2]], kind: e.kind, phase: ((e.j * 2654435761) >>> 0) / 4294967296 }));
+    for (const c of cores) c.shellMat.uniforms.uDockN.value = 0;
+    ribbons.geometry.setDrawRange(0, 0); fibers.geometry.setDrawRange(0, 0);
+    if (S.links === 'tubes') {
+      const R = L.buildTubes(near, RIB.segs, RIB.sides, start);
+      const ra = ribbons.geometry.attributes; ra.position.array.set(R.pos); ra.aNrm.array.set(R.nrm); ra.aT.array.set(R.t); ra.aDir.array.set(R.dir); ra.aPhase.array.set(R.phase); ra.aKind.array.set(R.kind);
+      ribbons.geometry.index.array.set(R.index); for (const k in ra) ra[k].needsUpdate = true; ribbons.geometry.index.needsUpdate = true; ribbons.geometry.setDrawRange(0, R.indexCount);
+    } else {
+      const F = L.buildFibers(near, FIB.segs, start);
+      const fa = fibers.geometry.attributes; fa.position.array.set(F.pos); fa.aTan.array.set(F.tan); fa.aSide.array.set(F.side); fa.aT.array.set(F.t); fa.aDir.array.set(F.dir); fa.aPhase.array.set(F.phase); fa.aKind.array.set(F.kind);
+      fibers.geometry.index.array.set(F.index); for (const k in fa) fa[k].needsUpdate = true; fibers.geometry.index.needsUpdate = true; fibers.geometry.setDrawRange(0, F.indexCount);
+      pendingDocks = near.map((e, k) => ({ d: F.dock[k], ph: e.phase, kind: e.kind })).filter((x) => x.kind === 0).slice(0, FIB.docks);
+    }
     // ... the rest is faint hair
     let nl = 0;
     for (const e of nb.slice(RIB.max)) {
@@ -1109,7 +1194,7 @@
     S.hiF[i] = 3;
     lines.geometry.attributes.position.needsUpdate = true; lines.geometry.attributes.color.needsUpdate = true; lines.geometry.setDrawRange(0, nl * 2);
     pts.geometry.attributes.aHi.needsUpdate = true;
-    selMark.visible = false; coreShow(i);
+    selMark.visible = false; coreShow(i); setDocks(core, S.links === 'fibers' ? pendingDocks : []);
     applyUniforms(); panels.info.dirty = true; syncSourcePanel();
     if (!keepSrc) loadSource(i);
   }
@@ -1394,6 +1479,7 @@
       if (e.code === 'KeyH' || e.code === 'KeyY') toggleUI();         // hide / show all UI    (VR: Y)
       if (e.code === 'KeyL') cycleLayout();                           // tower -> helix x2 -> x4 -> x8
       if (e.code === 'KeyC') cycleClosure();                          // closure off / dim / only
+      if (e.code === 'KeyK') cycleLinks();                            // connection style: fibres / tubes
       if (e.code === 'KeyG') cycleGlow();                             // glow off / on / all
       if (e.code === 'KeyN') toggleSound();                           // sound on / off
       if (e.code === 'KeyX') toggleFollow();                          // follow live           (VR: X)
@@ -1451,6 +1537,7 @@
       sound.listener(pos, f, u);
     }
     ribbons.material.uniforms.uTime.value = t / 1000; ribbons.material.uniforms.uWorldScale.value = world.scale.x;
+    fibers.material.uniforms.uTime.value = t / 1000; fibers.material.uniforms.uWorldScale.value = world.scale.x; for (const c of cores) c.shellMat.uniforms.uDockT.value = t / 1000;
     morphTick(dt); grabTick(); coreTick(t, dt); beaconTick(t, dt);
     // adaptive quality: in VR, if frames stay slow (< ~42 fps) for 3 s, take the glow down one level (the saved choice is untouched; G raises it again)
     if (dtMs > 0 && dtMs < 500) {
@@ -1470,7 +1557,7 @@
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
     const el = $('loading'); if (el) el.remove();
-    window.RH = { ribbons: () => ribbons, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, link, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
+    window.RH = { ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, link, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }
   boot();
 })();

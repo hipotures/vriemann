@@ -195,7 +195,7 @@ load('lib.js'); load('audio.js'); load('app.js');
     global.fetch = realFetch2;
   });
   await t('connection tubes: all connections are lit 3D tubes (hubs beyond the cap: the rest as hair); flow direction, start on the core, nearest first, animation, hiding, shader sanity', async () => {
-    setView('tower'); const rib = RH.ribbons(), RIBc = RH.RIB, c = S.csr, deg = (i) => (c.impStart[i + 1] - c.impStart[i]) + (c.conStart[i + 1] - c.conStart[i]);
+    setView('tower'); if (S.links !== 'tubes') RH.cycleLinks(); assert.strictEqual(S.links, 'tubes'); const rib = RH.ribbons(), RIBc = RH.RIB, c = S.csr, deg = (i) => (c.impStart[i + 1] - c.impStart[i]) + (c.conStart[i + 1] - c.conStart[i]);
     const triPer = RIBc.segs * RIBc.sides * 6, per = (RIBc.segs + 1) * RIBc.sides;
     let few = -1, mid = -1, many = -1; for (let i = 0; i < S.n; i++) { const d = deg(i); if (few < 0 && d >= 3 && d <= 8) few = i; if (mid < 0 && d >= 40 && d <= RIBc.max) mid = i; if (many < 0 && d > RIBc.max + 20) many = i; if (few >= 0 && mid >= 0 && many >= 0) break; }
     assert(few >= 0 && mid >= 0 && many >= 0, 'need modules with few, many-but-fitting and hub-like connection counts');
@@ -228,6 +228,41 @@ load('lib.js'); load('audio.js'); load('app.js');
     // hiding: packets view, cleared selection
     setView('packets'); frame(); assert(!rib.visible, 'tubes belong to the tower view'); setView('tower'); frame(); assert(rib.visible);
     panels.info.buttons.find((b) => b.label === 'Clear').fn(); assert.strictEqual(segsOf(rib), 0, 'cleared selection: no tubes'); assert.strictEqual(segsOf(linesObj()), 0);
+    RH.cycleLinks(); assert.strictEqual(S.links, 'fibers');
+  });
+  await t('connection fibres (default): glowing additive arcs with comets, imports dock on the core with ripples, consumers dim and dashed; K / menu switch to tubes and back', async () => {
+    setView('tower'); assert.strictEqual(S.links, 'fibers', 'fibres are the default'); const fib = RH.fibers(), tub = RH.ribbons(), F = RH.FIB, RIBc = RH.RIB, c = S.csr;
+    const deg = (i) => (c.impStart[i + 1] - c.impStart[i]) + (c.conStart[i + 1] - c.conStart[i]), nImp = (i) => c.impStart[i + 1] - c.impStart[i];
+    let i = -1; for (let k = 0; k < S.n; k++) if (nImp(k) >= 20 && deg(k) <= RIBc.max && k !== RH.mainIdx()) { i = k; break; } assert(i >= 0);
+    RH.select(i); frame(16, 4);
+    assert.strictEqual(fib.geometry.drawRange.count, deg(i) * F.segs * 6, 'one fibre per connection'); assert.strictEqual(tub.geometry.drawRange.count, 0, 'no tubes at the same time');
+    // fibres start on the core surface
+    const a = fib.geometry.attributes, per = (F.segs + 1) * 2, P = S.pos;
+    for (let e = 0; e < deg(i); e++) { const v = e * per, d = Math.hypot(a.position.getX(v) - P[3 * i], a.position.getY(v) - P[3 * i + 1], a.position.getZ(v) - P[3 * i + 2]); assert(d <= RIBc.start + 1e-5 && d > 0.05, 'fibre ' + e + ' starts on the core: ' + d); }
+    // docking ripples: one per import (up to the cap), unit directions, none for consumers; the shell shader uses them
+    const u = RH.core().shellMat.uniforms; assert.strictEqual(u.uDockN.value, Math.min(F.docks, nImp(i)), 'a dock per import');
+    for (let k = 0; k < u.uDockN.value; k++) assert(Math.abs(u.uDock.value[k].length() - 1) < 1e-5);
+    const sf = RH.core().shellMat.fragmentShader; for (const need of ['uDock[k]', 'uDockN', 'uDockT*uDockSpd', 'rip']) assert(sf.includes(need), 'shell shader lacks ' + need);
+    assert.strictEqual(u.uDockSpd.value, F.speed); assert.strictEqual(u.uDockFreq.value, F.freq);
+    frame(16, 3); assert(Math.abs(u.uDockT.value - fib.material.uniforms.uTime.value) < 1e-9, 'ripples run on the same clock as the comets (arrivals line up)');
+    // the comet arrival phase is the same expression in both shaders
+    const ff = fib.material.fragmentShader; assert(ff.includes('.75 + .5*fract(vPhase*7.31)') && sf.includes('.75 + .5*fract(ph*7.31)'), 'same per-fibre pace in fibres and ripples');
+    // material: additive glow, no depth write, soft profile (no hard edge), fading ends and distance, imports vs consumers
+    const m = fib.material; assert(m.transparent && !m.depthWrite && m.blending === THREE.AdditiveBlending);
+    for (const need of ['exp(-s2*14.)', 'smoothstep(.75, 1., abs(vSide))', 'smoothstep(0., .06, vT)', 'vFar', 'head', 'tail', 'dash', 'wave']) assert(ff.includes(need), 'fibre shader lacks ' + need);
+    const fv = m.vertexShader; for (const need of ['uMinPx', 'normalize(mv.xyz)', 'aKind > .5 ? .5 : 1.']) assert(fv.includes(need), 'fibre vertex shader lacks ' + need);
+    const varyings = (sh) => [...sh.matchAll(/varying\s+float\s+([^;]+);/g)].flatMap((x) => x[1].split(',').map((y) => y.trim())).sort(); assert(varyings(fv).length >= 5); assert.deepStrictEqual(varyings(fv), varyings(ff));
+    for (const sh of [fv, ff, sf]) { assert((sh.match(/\{/g) || []).length === (sh.match(/\}/g) || []).length); for (const x of sh.matchAll(/smoothstep\(\s*([0-9.]+)\s*,\s*([0-9.]+)/g)) assert(parseFloat(x[1]) < parseFloat(x[2]), 'reversed smoothstep'); }
+    const t0 = m.uniforms.uTime.value; frame(16, 5); assert(m.uniforms.uTime.value > t0);
+    // switching: K key and the menu button; ripples belong to fibres only; the choice is remembered
+    winL.keydown.forEach((f) => f({ code: 'KeyK' })); frame(); assert.strictEqual(S.links, 'tubes'); assert(tub.geometry.drawRange.count > 0 && fib.geometry.drawRange.count === 0); assert.strictEqual(u.uDockN.value, 0, 'no ripples with tubes');
+    panels.menu.dirty = true; frame(); const btn = panels.menu.buttons.find((b) => /^Links: /.test(b.label)); assert(btn && btn.label === 'Links: tubes'); btn.fn(); frame();
+    assert.strictEqual(S.links, 'fibers'); assert(fib.geometry.drawRange.count > 0 && u.uDockN.value > 0);
+    // a new selection moves the docks to the new core and clears the old one
+    const old = RH.core(); let j = -1; for (let k = i + 1; k < S.n; k++) if (nImp(k) >= 3 && deg(k) <= RIBc.max && k !== RH.mainIdx()) { j = k; break; }
+    RH.select(j); frame(); assert(RH.core() !== old && old.shellMat.uniforms.uDockN.value === 0 && RH.core().shellMat.uniforms.uDockN.value === Math.min(F.docks, nImp(j)));
+    setView('packets'); frame(); assert(!fib.visible); setView('tower'); frame(); assert(fib.visible);
+    panels.info.buttons.find((b) => b.label === 'Clear').fn(); assert.strictEqual(fib.geometry.drawRange.count, 0); assert(RH.cores().every((x) => x.shellMat.uniforms.uDockN.value === 0));
   });
   await t('hover marker (the yellow wireframe ball): gone when the pointer leaves the window / the window loses focus, and never shown in recording mode (H)', async () => {
     setView('tower'); const mk = RH.hoverMark(), press = (code) => winL.keydown.forEach((f) => f({ code })), cv = sceneCanvas;
@@ -458,7 +493,7 @@ load('lib.js'); load('audio.js'); load('app.js');
     setView('tower'); const tower = S.layouts.tower.slice(); assert.strictEqual(S.layout, 'tower'); assert(S.pos.every((v, k) => v === tower[k]), 'start: the tower');
     const i = S.depth.indexOf(60); RH.select(i); frame(16, 40);
     const waitMorph = async () => { await until(() => !S.layoutLoading); for (let k = 0; k < 400 && RH.layoutState().morph; k++) frame(16, 1); };
-    const rib = () => RH.ribbons();
+    const rib = () => RH.fibers();                     // the default link style
     // 1. into the double helix
     assert(rib().geometry.drawRange.count > 0, 'ribbons visible before'); const ptsGeo = RH.halo().pts.geometry.attributes.position;
     const before = S.pos.slice(); await RH.setLayout('helix2'); assert(RH.layoutState().morph, 'a morph must have started'); const to = RH.layoutState().morph.to;
