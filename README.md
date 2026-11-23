@@ -45,7 +45,7 @@ The source panel uses **Iosevka Fixed** (narrow monospace, SIL OFL 1.1, `vendor/
 a few script capitals such as 𝓞 fall back to the system font. Each character gets its own grid cell, so a fallback glyph never shifts the rest of the row.
 
 ## Controls
-Desktop: drag = look around, WASD = move, Q/E = elevator (depth), click = select / press a button, wheel over the code = scroll (in the miniature: size),
+Desktop: drag = look around, WASD = move, Q/E = elevator (depth), click = select / press a button (click into empty space = deselect), wheel over the code = scroll (in the miniature: size),
 **B or M** = tower ⇄ miniature, **X** = follow live (off → camera → in place), **H or Y** = hide/show the UI, **R** = panels in front of me (A is "left", so recenter is R). **K** = connection style (fibres / tubes), **I** = debug letters, **+ / −** or Shift+wheel = zoom (0 = reset).
 VR (Touch controllers): trigger = select / button, left stick ▲▼ = elevator, right stick ◀▶ = rotate the world, right stick ▲▼ over the code = scroll,
 A = put the panels in front of me, B = tower ⇄ miniature on a table, X = follow live, Y = hide/show the panels.
@@ -89,7 +89,7 @@ The tree stands 12 m in front of you (not around your head); rotating the world 
 It is drawn as one additive ribbon mesh (violet haze, pink body, white-hot core; a flash runs down the whole tree every 14 s), with small labels
 (constant size on screen) on the root, every 6th trunk step and a few branches. **Every branch is clickable**, anywhere along its arc: it lights up
 with everything hanging from it (the rest dims), selects the module its declaration lives in and scrolls the source to that declaration; a click
-on the trunk lights that step with the lemmas branching off it. The info panel names the branch; Clear (or another module) drops the highlight. The modules move onto their first node like in any other layout.
+on the trunk lights that step with the lemmas branching off it. The info panel names the branch; Clear, another module or a click into empty space drops it. The dust is not clickable in the spine (it is everywhere). The modules move onto their first node like in any other layout.
 It needs `python3 build_spine.py` once (reads the Lean sources of the volume, `--vol`; ~40 s), which writes `data/pos_spine.f32`, `spine.json` and `spine.bin`;
 without them L skips the spine. The dependency graph is approximate (a declaration's text up to the next one, identifiers resolved by short name
 to the same module, a direct import, or a transitively imported module). Tune the look with `SPINE` in `app.js`, the shape with the constants at the top of `build_spine.py`.

@@ -1598,7 +1598,7 @@
     const lo = o.clone().applyMatrix4(tmpM), ld = d.clone().transformDirection(tmpM);
     if (S.view === 'tower' && spine && spineAmount() > 0.5) {             // spine: the tree's nodes (declarations) first, then the dust
       const j = L.pickPoint(spine.cpos, spine.cnode.length, lo, ld, null, false, 0.02);
-      if (j >= 0) { const k = spine.cnode[j]; return { node: spine.list[k].m, pk: -1, sk: k }; }
+      return j >= 0 ? { node: spine.list[spine.cnode[j]].m, pk: -1, sk: spine.cnode[j] } : { node: -1, pk: -1, sk: -1 };   // the dust is not clickable: it is everywhere, a click into empty space must stay empty
     }
     if (S.view === 'tower') return { node: L.pickPoint(S.pos, S.n, lo, ld, S.st, S.hideOpen, 0.02), pk: -1, sk: -1 };
     return { node: -1, pk: L.pickPoint(S.pkPos, S.meta.packets, lo, ld, null, false, 0.05) };
@@ -1640,12 +1640,14 @@
       if (r.sk >= 0) { const q = spine.list[r.sk].p; hoverMark.position.set(q[0], q[1], q[2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
       else if (r.node >= 0) { hoverMark.position.set(S.pos[3 * r.node], S.pos[3 * r.node + 1], S.pos[3 * r.node + 2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
       if (click && r.node >= 0) { stopFollow(); S.pendingDecl = r.sk >= 0 ? spine.list[r.sk].n : null; if (r.node !== S.sel) select(r.node); else gotoPendingDecl(); spineSelect(r.sk); }
+      else if (click && (S.sel >= 0 || S.selPk >= 0)) { stopFollow(); clearSel(); }          // a click into empty space deselects
       return r.node >= 0 ? 'node' : 'none';
     } else {
       if (r.pk !== S.hoverPk) { S.hoverPk = r.pk; panels.info.dirty = true; }
       hoverMark.visible = r.pk >= 0 && !S.uiHidden;
       if (r.pk >= 0) { hoverMark.position.set(S.pkPos[3 * r.pk], S.pkPos[3 * r.pk + 1], S.pkPos[3 * r.pk + 2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
       if (click && r.pk >= 0) selectPacket(r.pk);
+      else if (click && (S.sel >= 0 || S.selPk >= 0)) clearSel();
       return r.pk >= 0 ? 'node' : 'none';
     }
   }

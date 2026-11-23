@@ -590,7 +590,10 @@ load('lib.js'); load('audio.js'); load('app.js');
     const hot = sp.mesh.geometry.attributes.aHot.array; let nh = 0; for (const x of hot) nh += x; assert(nh > 0 && nh < hot.length / 4, 'only that branch (and its twigs) lit: ' + nh + '/' + hot.length);
     for (let v = 0; v < hot.length; v++) if (sp.vnode[v] === kn) assert.strictEqual(hot[v], 1, 'the clicked branch is lit');
     panels.info.dirty = true; frame(); assert(drawn.some((x) => x.includes('branch ' + nd.n)), 'the info panel names the branch');
-    panels.info.buttons.find((b) => b.label === 'Clear').fn(); assert.strictEqual(sp.mesh.material.uniforms.uHotOn.value, 0, 'Clear also clears the branch'); RH.select(nd.m); frame(16, 2);   // the next test expects a selection
+    // a click into empty space (straight up, above the tree; the dust around is not clickable) deselects everything
+    delete ents.rc.components; ents.rc.object3D.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0.05, 1, 0.3).normalize()); ents.rc.object3D.updateMatrixWorld(true);
+    S.focus = 0; frame(16, 2); ents.rc.listeners.triggerdown[0](); ents.rc.components = comps;
+    assert.strictEqual(S.sel, -1, 'empty click deselects (got ' + (S.sel >= 0 ? S.names[S.sel] : '') + ')'); assert.strictEqual(sp.mesh.material.uniforms.uHotOn.value, 0, 'and drops the branch highlight'); RH.select(nd.m); frame(16, 2);   // the next test expects a selection
     ents.panels.object3D.position.set(0, 0, 0); ents.panels.object3D.updateMatrixWorld(true);
     setView('packets'); frame(16, 2); assert(!sp.mesh.visible, 'no tree in the packets view'); setView('tower');
     await RH.setLayout('tower'); await waitMorph(); frame(16, 2); assert(!sp.mesh.visible && !sp.labels.visible, 'gone again in the tower'); assert(RH.rulers.some((m) => m.visible), 'rulers back');
