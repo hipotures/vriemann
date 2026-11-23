@@ -143,14 +143,62 @@ def newest_log():
     return best, bt
 
 
+HIST_CACHE = ROOT / "data/history_cache.json.gz"
+
+
+def scan_log(p, off=0):
+    """the Built lines of a log from byte offset `off` (a line start) up to its last complete line -> ([(module, secs)], end offset).
+    Most of a log is compiler output, so a line without b"Built" is skipped before any decoding or regex (10 GB of logs: minutes -> seconds)."""
+    out = []
+    with open(p, "rb") as f:
+        f.seek(off)
+        for raw in f:
+            if not raw.endswith(b"\n"):
+                break                                  # a line still being written: next time
+            off += len(raw)
+            if b"Built" not in raw:
+                continue
+            m = BUILT.match(ANSI.sub("", raw.decode("utf-8", "replace")).rstrip())
+            if m:
+                out.append((m.group(3), float(m.group(4)) / (1000.0 if m.group(5) == "ms" else 1.0)))
+    return out, off
+
+
 def scan_history():
+    """our built modules and their compile times from every build log.  The result per log is cached in data/ (keyed by
+    inode and the offset read so far), so a restart only reads new logs and what was appended to the others."""
+    try:
+        cache = json.loads(gzip.decompress(HIST_CACHE.read_bytes()))
+    except (OSError, ValueError):
+        cache = {}
+    logs = cache.get("logs", {}) if cache.get("v") == 1 else {}
+    fresh, changed = {}, False
     for p in RECEIPTS.glob("*/build.log"):
         try:
-            with open(p, "rb") as f:
-                for raw in f:
-                    parse_line(raw.decode("utf-8", "replace"), False)
+            st = p.stat()
         except OSError:
-            pass
+            continue
+        c = logs.get(str(p))
+        if not (c and c["ino"] == st.st_ino and c["off"] <= st.st_size):
+            c = {"ino": st.st_ino, "off": 0, "built": []}   # new, replaced or truncated: from the start
+        if st.st_size > c["off"]:
+            try:
+                more, c["off"] = scan_log(p, c["off"])
+            except OSError:
+                continue
+            c["built"] += more; changed = True
+        fresh[str(p)] = c
+    for c in fresh.values():
+        for name, secs in c["built"]:
+            k = name_idx.get(name)
+            if k is not None:
+                ours.add(k); durations[k] = secs
+    if changed or len(fresh) != len(logs):
+        try:
+            tmp = HIST_CACHE.with_suffix(".tmp")
+            tmp.write_bytes(gzip.compress(json.dumps({"v": 1, "logs": fresh}).encode(), 6)); tmp.replace(HIST_CACHE)
+        except OSError:
+            pass                                       # read-only data/: just slower next time
 
 
 def tail_loop():
@@ -504,13 +552,17 @@ class Server(ThreadingHTTPServer):
 
 
 def main():
-    scan_history(); time_model()            # fit the compile-time model once up front (reads ~50k source files, ~2 s)
+    t0 = time.time(); scan_history(); t1 = time.time(); time_model()   # fit the compile-time model once up front (reads the built modules' sources)
+    print(f"rh-vr: build history {t1 - t0:.1f} s, time model {time.time() - t1:.1f} s", flush=True)
     # start the tailer at the end of the existing active log, but keep a short tail for the panel
     p, mt = newest_log()
     if p is not None:
         active.update(path=p, off=p.stat().st_size, buf=b"", mtime=mt)
         recent = []
         with open(p, "rb") as f:
+            start = max(0, active["off"] - 4_000_000); f.seek(start)                 # the last few MB are plenty for the last 24 Built lines
+            if start:
+                f.readline()                                                       # (a partial first line)
             for raw in f:
                 line = ANSI.sub("", raw.decode("utf-8", "replace")).rstrip()
                 m = BUILT.match(line)
