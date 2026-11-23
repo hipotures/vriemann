@@ -13,6 +13,12 @@ A visualization of the Lean verification of Alpöge's RH proof ([alpoge-rh-repla
 <a href="docs/GALLERY.md#the-proof-as-a-helix"><img src="docs/gallery/helix-2.webp" height="200" alt="The proof as a helix"></a>
 </p>
 
+<p align="center">
+<a href="docs/GALLERY.md#the-proof-spine"><img src="docs/gallery/spine-1.webp" height="200" alt="The proof spine"></a>
+<a href="docs/GALLERY.md#connections-in-the-spine"><img src="docs/gallery/spine-links-3.webp" height="200" alt="Connections in the spine"></a>
+<a href="docs/GALLERY.md#inside-the-full-spine"><img src="docs/gallery/spine-full-2.webp" height="200" alt="Inside the full spine"></a>
+</p>
+
 <p align="center"><b><a href="docs/GALLERY.md">More in the gallery →</a></b></p>
 
 ## Quick start

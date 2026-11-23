@@ -77,6 +77,76 @@
           ]
         }
       ]
+    },
+    {
+      "slug": "spine",
+      "title": "The proof spine",
+      "caption": "The spine layout: the trunk is a chain of declarations from riemannHypothesis down, each named in the proof of the previous one; the branches are the lemmas each step names, the dots that fall off the tree are the dust. Left: the bare tree (Closure: only); right: a module on the tree selected, its imports in cyan.",
+      "images": [
+        {
+          "file": "spine-1.webp",
+          "size": [
+            1585,
+            1800
+          ]
+        },
+        {
+          "file": "spine-2.webp",
+          "size": [
+            1585,
+            1800
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "spine-links",
+      "title": "Connections in the spine",
+      "caption": "Selecting modules on the trunk: the cyan fibres bring in their imports, the magenta ones lead to the modules that use them, all crossing the lightning tree.",
+      "images": [
+        {
+          "file": "spine-links-1.webp",
+          "size": [
+            1585,
+            1800
+          ]
+        },
+        {
+          "file": "spine-links-2.webp",
+          "size": [
+            1585,
+            1800
+          ]
+        },
+        {
+          "file": "spine-links-3.webp",
+          "size": [
+            1585,
+            1800
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "spine-full",
+      "title": "Inside the full spine",
+      "caption": "An early version of the full level, with a branch for every one of the 175,187 modules: looking down the trunk into the white-hot core, and up close among the branches. (Too heavy for the browser; the full level now draws ribbons only for the trunk and three levels of branches.)",
+      "images": [
+        {
+          "file": "spine-full-1.webp",
+          "size": [
+            1800,
+            1216
+          ]
+        },
+        {
+          "file": "spine-full-2.webp",
+          "size": [
+            1800,
+            1216
+          ]
+        }
+      ]
     }
   ]
 }
