@@ -281,6 +281,65 @@
     return { pos, tan, side, t, dir, phase, kind, index, dock, vertexCount: V, indexCount: I };
   }
 
+  // ---- the spine layout (build_spine.py): the proof as a lightning tree.  nodes = [{p:[x,y,z], up:parent or -1, lv:0 trunk / 1.. branch}],
+  //      trunk nodes first and in order.  Every curve becomes a camera-facing ribbon (2 vertices per sample, like the fibres):
+  //      the trunk is one Catmull-Rom curve through its nodes with a fine zigzag (the "lightning"), each branch a bowed quadratic arc
+  //      from its parent.  Per vertex: aT = 0..1 along its own curve, aG = 0..1 down the whole tree (for the flash running down),
+  //      aW = half-width in world units (branches taper to their tips), aLv = level.
+  const hash2 = (a, b) => { const x = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return x - Math.floor(x); };
+  function buildSpine(nodes, o) {
+    o = Object.assign({ w: [0.06, 0.028, 0.016, 0.010, 0.007], sub: 10, segs: 10, jitter: 0.035, bow: 0.22 }, o || {});
+    const trunk = []; for (let k = 0; k < nodes.length && nodes[k].lv === 0; k++) trunk.push(k);
+    const T = trunk.length, step = new Float32Array(nodes.length);       // the trunk step each node hangs from (for aG)
+    for (let k = 0; k < nodes.length; k++) step[k] = nodes[k].lv === 0 ? k : step[nodes[k].up];
+    const curves = [];                                                     // {pts:[[x,y,z]], g0, g1, w, lv}
+    if (T > 1) {
+      const P = (i) => nodes[trunk[Math.max(0, Math.min(T - 1, i))]].p, pts = [];
+      for (let i = 0; i < T - 1; i++) {
+        const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+        for (let s = 0; s < o.sub; s++) {
+          const u = s / o.sub, u2 = u * u, u3 = u2 * u;
+          const c = (k) => 0.5 * (2 * p1[k] + (-p0[k] + p2[k]) * u + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * u2 + (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * u3);
+          const j = i * o.sub + s, zig = s === 0 ? 0 : o.jitter;           // the nodes themselves stay exact
+          pts.push([c(0) + zig * (hash2(j, 1) - 0.5) * 2, c(1) + zig * (hash2(j, 2) - 0.5), c(2) + zig * (hash2(j, 3) - 0.5) * 2]);
+        }
+      }
+      pts.push(P(T - 1).slice());
+      curves.push({ pts, g0: 0, g1: 1, w: o.w[0], lv: 0 });
+    }
+    for (let k = 0; k < nodes.length; k++) {
+      const nd = nodes[k]; if (nd.lv === 0 || nd.up < 0) continue;
+      const a = nodes[nd.up].p, b = nd.p, d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], len = Math.hypot(d[0], d[1], d[2]) || 1e-6;
+      // bow sideways (a random direction perpendicular to the branch) and sag a little: grown, not ruled
+      let r = [hash2(k, 4) - 0.5, hash2(k, 5) - 0.5, hash2(k, 6) - 0.5]; const dot = (r[0] * d[0] + r[1] * d[1] + r[2] * d[2]) / (len * len);
+      r = [r[0] - dot * d[0], r[1] - dot * d[1], r[2] - dot * d[2]]; const rl = Math.hypot(r[0], r[1], r[2]) || 1;
+      const bw = o.bow * len * (0.5 + hash2(k, 7)) / rl;
+      const m = [(a[0] + b[0]) / 2 + r[0] * bw, (a[1] + b[1]) / 2 + r[1] * bw - 0.12 * len, (a[2] + b[2]) / 2 + r[2] * bw];
+      const pts = [];
+      for (let s = 0; s <= o.segs; s++) { const q = s / o.segs, w0 = (1 - q) * (1 - q), w1 = 2 * (1 - q) * q, w2 = q * q; pts.push([0, 1, 2].map((c) => w0 * a[c] + w1 * m[c] + w2 * b[c])); }
+      const g = T > 1 ? step[k] / (T - 1) : 0;
+      curves.push({ pts, g0: g, g1: Math.min(1, g + 0.02 * nd.lv), w: o.w[Math.min(nd.lv, o.w.length - 1)], lv: nd.lv });
+    }
+    let V = 0, I = 0; for (const c of curves) { V += c.pts.length * 2; I += (c.pts.length - 1) * 6; }
+    const pos = new Float32Array(V * 3), tan = new Float32Array(V * 3), side = new Float32Array(V), t = new Float32Array(V),
+      g = new Float32Array(V), w = new Float32Array(V), lv = new Float32Array(V), index = new Uint32Array(I);
+    let v = 0, ii = 0;
+    for (const c of curves) {
+      const n = c.pts.length, base = v;
+      for (let s = 0; s < n; s++) {
+        const pa = c.pts[Math.max(0, s - 1)], pb = c.pts[Math.min(n - 1, s + 1)];
+        let tx = pb[0] - pa[0], ty = pb[1] - pa[1], tz = pb[2] - pa[2]; const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+        const q = n > 1 ? s / (n - 1) : 0, width = c.lv === 0 ? c.w : c.w * (1 - 0.65 * q);
+        for (let sd = 0; sd < 2; sd++, v++) {
+          pos.set(c.pts[s], 3 * v); tan[3 * v] = tx; tan[3 * v + 1] = ty; tan[3 * v + 2] = tz;
+          side[v] = sd ? 1 : -1; t[v] = q; g[v] = c.g0 + (c.g1 - c.g0) * q; w[v] = width; lv[v] = c.lv;
+        }
+      }
+      for (let s = 0; s < n - 1; s++) { const v0 = base + 2 * s; index.set([v0, v0 + 1, v0 + 2, v0 + 1, v0 + 3, v0 + 2], ii); ii += 6; }
+    }
+    return { pos, tan, side, t, g, w, lv, index, curves: curves.length, trunkSteps: T, vertexCount: V, indexCount: I };
+  }
+
   // ---- the critical line above Main: the first 30 non-trivial zeros of zeta (imaginary parts, all on Re s = 1/2)
   const ZETA_ZEROS = [14.134725, 21.022040, 25.010858, 30.424876, 32.935062, 37.586178, 40.918719, 43.327073, 48.005151, 49.773832,
     52.970321, 56.446248, 59.347044, 60.831779, 65.112544, 67.079811, 69.546402, 72.067158, 75.704691, 77.144840,
@@ -381,6 +440,6 @@
   const fmt = (x) => String(Math.round(x)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const pct = (a, b) => (b ? (100 * a / b).toFixed(1) : '0.0') + '%';
 
-  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, pickSolids,buildTubes, buildFibers, ZETA_ZEROS, zeroHeights, zeroFlash, nucleusProgress, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
+  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, pickSolids, buildTubes, buildFibers, buildSpine, ZETA_ZEROS, zeroHeights, zeroFlash, nucleusProgress, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.RHLib = api;
 })(typeof self !== 'undefined' ? self : this);

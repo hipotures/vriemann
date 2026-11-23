@@ -548,10 +548,10 @@ load('lib.js'); load('audio.js'); load('app.js');
     const p = S.pk[i]; let sx = 0, sz = 0, cnt = 0; for (let j = 0; j < S.n; j++) if (S.pk[j] === p) { sx += S.pos[3 * j]; sz += S.pos[3 * j + 2]; cnt++; }
     assert(Math.abs(S.pkPos[3 * p] - sx / cnt) < 1e-3 && Math.abs(S.pkPos[3 * p + 2] - sz / cnt) < 1e-3, 'packet centroids recomputed for the packets view');
     const mi = RH.mainIdx(); assert(RH.beacon().group.position.distanceTo(new THREE.Vector3(S.pos[3 * mi], S.pos[3 * mi + 1], S.pos[3 * mi + 2])) < 1e-9, 'the Main landmark moved with Main');
-    // 2. cycle with the key / the button: x2 -> x4 -> x8 -> tower
+    // 2. cycle with the key / the button: x2 -> x4 -> x8 -> spine -> tower
     const press = (code) => winL.keydown.forEach((f) => f({ code })), btn = () => panels.menu.buttons.find((b) => b.label.startsWith('Layout'));
     for (const kk in panels) panels[kk].dirty = true; frame(); assert.strictEqual(btn().label, 'Layout: helix ×2');
-    for (const [name, label] of [['helix4', 'Layout: helix ×4'], ['helix8', 'Layout: helix ×8'], ['tower', 'Layout: tower']]) { press('KeyL'); await waitMorph(); assert.strictEqual(S.layout, name); for (const kk in panels) panels[kk].dirty = true; frame(); assert.strictEqual(btn().label, label); }
+    for (const [name, label] of [['helix4', 'Layout: helix ×4'], ['helix8', 'Layout: helix ×8'], ['spine', 'Layout: spine'], ['tower', 'Layout: tower']]) { press('KeyL'); await until(() => S.layoutTarget === name); await waitMorph(); assert.strictEqual(S.layout, name, S.layoutError); for (const kk in panels) panels[kk].dirty = true; frame(); assert.strictEqual(btn().label, label); }
     assert(S.pos.every((v, j) => v === tower[j]), 'back to the tower: exactly the original positions');
     // 3. interrupting a morph starts from the positions as drawn (no jump)
     await RH.setLayout('helix4'); frame(16, 40); const mid = S.pos.slice(); await RH.setLayout('helix8'); const m2 = RH.layoutState().morph; let maxJump = 0; for (let j = 0; j < mid.length; j += 997) maxJump = Math.max(maxJump, Math.abs(m2.from[j] - mid[j])); assert(maxJump < 1e-6, 'the new morph must start where the old one was: ' + maxJump);
@@ -561,6 +561,26 @@ load('lib.js'); load('audio.js'); load('app.js');
     await RH.setLayout('helix2'); assert(S.layoutError.includes('404'), 'error recorded: ' + S.layoutError); assert.strictEqual(S.layout, 'tower'); assert.strictEqual(S.layoutTarget, 'tower'); assert(!RH.layoutState().morph);
     for (const kk in panels) panels[kk].dirty = true; frame(); assert.strictEqual(btn().label, 'Layout: failed'); global.fetch = real; S.layoutError = '';
     assert(S.pos.every((v, j) => v === tower[j]), 'positions untouched after the failure'); frame(16, 5);
+  });
+  await t('spine layout: the lightning tree fades in with the morph, dust is dimmed, rulers hide, and without data L skips it', async () => {
+    const waitMorph = async () => { await until(() => !S.layoutLoading); for (let k = 0; k < 400 && RH.layoutState().morph; k++) frame(16, 1); };
+    setView('tower'); await RH.setLayout('tower'); await waitMorph(); frame(16, 2);
+    if (RH.spine()) assert.strictEqual(RH.spineAmount(), 0, 'nothing of the spine in the tower');
+    await RH.setLayout('spine'); frame(16, 30); const mid = RH.spineAmount(); assert(mid > 0 && mid < 1, 'cross-fades with the morph: ' + mid);
+    await waitMorph(); frame(16, 2); const sp = RH.spine(); assert.strictEqual(S.layout, 'spine');
+    assert(sp.mesh.visible && sp.mesh.material.uniforms.uAlpha.value === 1, 'tree shown'); assert(sp.steps > 10 && sp.nodes > sp.steps, 'a trunk with branches: ' + sp.steps + '/' + sp.nodes);
+    assert.strictEqual(RH.halo().ptsMat.uniforms.uSpine.value, 1, 'points know they are in the spine (dust dimmed)');
+    const aS = RH.halo().pts.geometry.attributes.aSpine.array; let reached = 0; for (const v of aS) reached += v; assert.strictEqual(reached, sp.reached, 'reached modules flagged');
+    assert(sp.labels.children.some((l) => l.userData.text === sp.root), 'the root is labelled'); assert(sp.labels.children.some((l) => l.userData.legend), 'legend shown');
+    assert(RH.rulers.every((m) => !m.visible), 'depth rulers hidden in the spine');
+    const mi = RH.mainIdx(), top = S.layouts.spine; assert(top[3 * mi + 1] > 19, 'Main (riemannHypothesis) sits on top of the trunk');
+    setView('packets'); frame(16, 2); assert(!sp.mesh.visible, 'no tree in the packets view'); setView('tower');
+    await RH.setLayout('tower'); await waitMorph(); frame(16, 2); assert(!sp.mesh.visible && !sp.labels.visible, 'gone again in the tower'); assert(RH.rulers.some((m) => m.visible), 'rulers back');
+    // no spine data: L goes helix8 -> tower and the menu says why it failed once
+    const real = global.fetch; global.fetch = (u, o) => String(u).includes('spine') ? Promise.resolve({ ok: false, status: 404 }) : real(u, o); delete S.layouts.spine; const keep = S.spineMissing;
+    await RH.setLayout('spine'); assert(S.layoutError.includes('build_spine.py'), 'tells what to run: ' + S.layoutError); assert.strictEqual(S.layout, 'tower');
+    await RH.setLayout('helix8'); await waitMorph(); RH.cycleLayout(); await until(() => S.layoutTarget === 'tower'); await waitMorph(); assert.strictEqual(S.layout, 'tower', 'spine skipped');
+    global.fetch = real; S.spineMissing = keep; S.layoutError = ''; frame(16, 2);
   });
   await t('module sphere fades out when the selection is cleared (not a pop) and stays out of the packets view', () => {
     const c = RH.core(); frame(16, 40); assert(c.fade > 0.99, 'should be fully shown first');

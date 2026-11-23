@@ -39,11 +39,19 @@
     applyGlow(); if (panels.menu) panels.menu.dirty = true;
   }
   // ------------------------------------------------------------------ layouts: the tower (rings) or an N-fold helix; positions morph smoothly between them
-  const LAYOUTS = ['tower', 'helix2', 'helix4', 'helix8'], LAYOUT_LABEL = { tower: 'tower', helix2: 'helix ×2', helix4: 'helix ×4', helix8: 'helix ×8' }, MORPH_SEC = 1.6;
+  const LAYOUTS = ['tower', 'helix2', 'helix4', 'helix8', 'spine'], LAYOUT_LABEL = { tower: 'tower', helix2: 'helix ×2', helix4: 'helix ×4', helix8: 'helix ×8', spine: 'spine' }, MORPH_SEC = 1.6;
   async function ensureLayout(name) {
     if (S.layouts[name]) return S.layouts[name];
-    const a = new Float32Array(await bget('/data/pos_' + name + '.f32'));
+    let a, sp;
+    try {
+      [a, sp] = await Promise.all([bget('/data/pos_' + name + '.f32'), name === 'spine' && !spine ? Promise.all([jget('/data/spine.json'), bget('/data/spine.bin')]) : null]);
+    } catch (e) {
+      if (name === 'spine') { S.spineMissing = true; throw new Error('no spine data – run build_spine.py (' + (e.message || e) + ')'); }   // L skips it from now on
+      throw e;
+    }
+    a = new Float32Array(a);
     if (a.length !== S.n * 3) throw new Error('layout ' + name + ' has the wrong size');
+    if (sp) buildSpine(sp[0], new Uint8Array(sp[1]));
     return (S.layouts[name] = a);
   }
   function recomputePacketCentroids() {
@@ -63,7 +71,98 @@
     } catch (e) { S.layoutError = String(e.message || e); S.layoutTarget = S.layout; }
     S.layoutLoading = false; if (panels.menu) panels.menu.dirty = true;
   }
-  function cycleLayout() { setLayout(LAYOUTS[(LAYOUTS.indexOf(S.layoutTarget) + 1) % LAYOUTS.length]); }
+  function cycleLayout() {
+    const list = LAYOUTS.filter((x) => !(x === 'spine' && S.spineMissing));       // the spine needs build_spine.py (and the Lean volume) once
+    setLayout(list[(list.indexOf(S.layoutTarget) + 1) % list.length]);
+  }
+
+  // ------------------------------------------------------------------ the spine layout: the proof as a lightning tree (build_spine.py)
+  // trunk = a chain of declarations from riemannHypothesis down, each named in the proof of the previous one; branches = lemmas each step
+  // names (sampled, up to 4 levels); dust = modules the tree never reaches (dimmed).  The modules themselves move like in any other layout
+  // (a module sits on its first node); on top of them one additive ribbon mesh draws the tree, with a flash running down it now and then.
+  const SPINE = { halo: 3.0, minPx: 1.6, flashSec: 14, labelH: 0.13, labelEvery: 6, labelsLv1: 10 };
+  let spine = null;
+  const SPINE_V = `
+    attribute vec3 aTan; attribute float aSide, aT, aG, aW, aLv;
+    uniform float uWorldScale, uMinPx, uHalo;
+    varying float vSide, vT, vG, vLv;
+    void main(){
+      vec4 mv = modelViewMatrix*vec4(position, 1.);
+      vec3 tv = normalize(mat3(modelViewMatrix)*aTan);
+      vec3 sv = cross(tv, normalize(mv.xyz)); float sl = length(sv); sv = sl > 1e-4 ? sv/sl : vec3(1., 0., 0.);   // across, facing the eye
+      float w = max(aW*uHalo*uWorldScale, uMinPx*max(-mv.z, .05)/(projectionMatrix[1][1]*500.));
+      mv.xyz += sv*aSide*w;
+      vSide = aSide; vT = aT; vG = aG; vLv = aLv;
+      gl_Position = projectionMatrix*mv;
+    }`;
+  // a wide violet haze, a pink body and a thin white-hot core (the trunk's core is the brightest), all additive: where branches cross
+  // they add up to white, like the poster.  A flash runs down the whole tree every SPINE.flashSec seconds; the trunk flickers a little.
+  const SPINE_F = `
+    uniform float uTime, uAlpha, uFlashSec;
+    varying float vSide, vT, vG, vLv;
+    void main(){
+      float s2 = vSide*vSide, trunk = 1. - step(.5, vLv);
+      float core = exp(-s2*45.), body = exp(-s2*9.), haze = exp(-s2*2.2);
+      float x = fract(uTime/uFlashSec)*1.6 - .3, flash = exp(-pow((vG - x)*10., 2.));
+      float flick = mix(1., .82 + .18*sin(uTime*23. + vG*97.), trunk);
+      float tip = trunk > .5 ? 1. : 1. - .5*vT;
+      float ends = smoothstep(0., .04, vT) + trunk;                                // branches grow out of the trunk, no blob at the joint
+      vec3 col = vec3(.50, .26, .92)*haze*.30 + vec3(1., .36, 1.)*body*(.45 + .25*trunk) + vec3(1., .92, 1.)*core*(.30 + .95*trunk);
+      col *= tip*flick*(1. + 1.6*flash)*min(ends, 1.);
+      gl_FragColor = vec4(col, uAlpha);
+    }`;
+  function buildSpine(js, r) {
+    if (r.length !== S.n) throw new Error('spine.bin has the wrong size');
+    const b = L.buildSpine(js.nodes), g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(b.pos, 3)); g.setAttribute('aTan', new THREE.BufferAttribute(b.tan, 3));
+    for (const [k, a] of [['aSide', b.side], ['aT', b.t], ['aG', b.g], ['aW', b.w], ['aLv', b.lv]]) g.setAttribute(k, new THREE.BufferAttribute(a, 1));
+    g.setIndex(new THREE.BufferAttribute(b.index, 1));
+    const mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({ vertexShader: SPINE_V, fragmentShader: SPINE_F, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { uTime: { value: 0 }, uAlpha: { value: 0 }, uWorldScale: { value: 1 }, uMinPx: { value: SPINE.minPx }, uHalo: { value: SPINE.halo }, uFlashSec: { value: SPINE.flashSec } } }));
+    mesh.frustumCulled = false; mesh.renderOrder = 2; mesh.visible = false; world.add(mesh);
+    // labels: the root, every few trunk steps, and a few first-level branches; sprites (they face the viewer, in VR too)
+    const labels = new THREE.Group(); labels.visible = false; world.add(labels);
+    const T = b.trunkSteps, pick = [];
+    for (let k = 0; k < T; k++) if (k < 2 || k % SPINE.labelEvery === 0 || k === T - 1) pick.push(k);
+    const lv1 = js.nodes.map((nd, k) => k).filter((k) => js.nodes[k].lv === 1);
+    for (let j = 0; j < SPINE.labelsLv1 && lv1.length; j++) pick.push(lv1[Math.floor((j + 0.5) * lv1.length / SPINE.labelsLv1)]);
+    const mkLabel = (text, color, h, lines) => {
+      lines = lines || [text]; const cv = document.createElement('canvas'), fs = 40, pad = 8, cx = cv.getContext('2d');
+      cx.font = `${fs}px ${MONO}`; const tw = Math.max(...lines.map((l) => cx.measureText(l).width));
+      cv.width = Math.ceil(tw + 2 * pad); cv.height = lines.length * (fs + 8) + 2 * pad;
+      cx.font = `${fs}px ${MONO}`; cx.fillStyle = color; cx.textBaseline = 'top'; lines.forEach((l, i) => cx.fillText(l, pad, pad + i * (fs + 8)));
+      const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, toneMapped: false, opacity: 0 }));
+      const k = h / (fs + 8); sp.scale.set(k * cv.width, k * cv.height, 1); sp.center.set(0, 0.5);     // h = height of one line
+      sp.userData.text = lines.join('\n'); return sp;
+    };
+    for (const k of pick) {
+      const nd = js.nodes[k], sp = mkLabel(nd.n, nd.lv === 0 ? '#ffe6ff' : '#d9b8ff', SPINE.labelH * (nd.lv === 0 ? 1 : 0.8));
+      sp.position.set(nd.p[0] + 0.12, nd.p[1], nd.p[2]); sp.userData.node = k; labels.add(sp);
+    }
+    if (T) {
+      const top = js.nodes[0].p, leg = mkLabel('', '#b9a3d9', SPINE.labelH * 0.7, [`trunk = ${T}-step proof spine from ${js.nodes[0].n}`, 'branches = sampled lemmas each step names', 'dust = modules never reached']);
+      leg.position.set(top[0] + 0.12, top[1] + 1.2, top[2]); leg.userData.legend = true; labels.add(leg);
+    }
+    const sa = pts.geometry.attributes.aSpine; for (let i = 0; i < r.length; i++) sa.array[i] = r[i]; sa.needsUpdate = true;
+    spine = { mesh, labels, steps: T, nodes: js.nodes.length, reached: r.reduce((a, x) => a + x, 0), root: js.root };
+    return spine;
+  }
+  /** how much of the spine is shown: 1 in the spine layout, 0 elsewhere, cross-fading with the morph; only in the tower view */
+  function spineAmount() {
+    const m = S.morph; let a = S.layout === 'spine' ? 1 : 0;
+    if (m) { const e = m.t * m.t * (3 - 2 * m.t); a = m.name === 'spine' ? Math.max(a * (1 - e), e) : a * (1 - e); }
+    return S.view === 'tower' ? a : 0;
+  }
+  function spineTick(t) {
+    const a = spineAmount();
+    ptsMat.uniforms.uSpine.value = spine ? a : 0;
+    for (const m of rulers) m.visible = !S.uiHidden && a < 0.5;                     // "depth 25" means nothing in the spine
+    if (!spine) return;
+    const u = spine.mesh.material.uniforms; u.uAlpha.value = a; u.uTime.value = t / 1000; u.uWorldScale.value = world.scale.x;
+    spine.mesh.visible = a > 0.002; spine.labels.visible = a > 0.002 && !S.uiHidden;
+    for (const sp of spine.labels.children) sp.material.opacity = a * (sp.userData.legend ? 0.8 : 0.95);
+  }
   function morphTick(dt) {
     const m = S.morph; if (!m) return;
     m.t = Math.min(1, m.t + dt / MORPH_SEC); const e = m.t * m.t * (3 - 2 * m.t), P = S.pos, A = m.from, B = m.to;
@@ -134,8 +233,8 @@
 
   // ------------------------------------------------------------------ shaders
   const VERT = `
-    uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly;
-    attribute float aState, aNs, aDepth, aHi, aSolid;
+    uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly, uSpine;
+    attribute float aState, aNs, aDepth, aHi, aSolid, aSpine;
     varying vec3 vCol; varying float vA;
     vec3 hsv2rgb(vec3 c){ vec4 K=vec4(1.,2./3.,1./3.,3.); vec3 p=abs(fract(c.xxx+K.xyz)*6.-K.www); return c.z*mix(K.xxx,clamp(p-K.xxx,0.,1.),c.y); }
     void main(){
@@ -154,6 +253,10 @@
       } else {
         col = .5+.5*cos(6.28318*(vec3(aDepth)+vec3(0.,.33,.67))); a = st < .5 ? .7 : .95;
         if (st > 3.5) { col = vec3(1.); size *= 2.5; }
+      }
+      if (uSpine > 0.) {                                            // spine layout: reached modules glow violet, the rest is faint dust
+        if (aSpine > .5) { col = mix(col, vec3(1.,.55,1.), .6*uSpine); }
+        else { col = mix(col, vec3(.30,.27,.42), uSpine); a *= 1. - .6*uSpine; size *= 1. - .35*uSpine; }
       }
       if (aHi > .5) {
         if (aHi < 1.5) col = vec3(0.,1.,1.); else if (aHi < 2.5) col = vec3(1.,.3,.9); else { col = vec3(1.); size *= 3.; }
@@ -203,7 +306,7 @@
   /** same colour logic as the dots, but bigger, soft (gaussian) and additive; open dots only get a halo on the "all" level */
   function derive(src, pairs) { let o = src; for (const [a, b] of pairs) { if (!o.includes(a)) throw new Error('shader derivation failed: ' + a.slice(0, 50)); o = o.replace(a, b); } return o; }
   const HALO_VERT = derive(VERT, [
-    ['uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly;', 'uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly, uGlow, uGlowOpen, uHaloScale;'],
+    ['uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly, uSpine;', 'uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly, uSpine, uGlow, uGlowOpen, uHaloScale;'],
     ['if (uHideOpen > .5 && st < .5 && aHi < .5) {', 'if ((uHideOpen > .5 || uGlowOpen <= 0.) && st < .5 && aHi < .5) {'],
     ['size*projectionMatrix[1][1]*500./max(-mv.z,.05), 2.2, 26.)', 'size*uHaloScale*projectionMatrix[1][1]*500./max(-mv.z,.05), 4., 28.)'],
     ['vCol = col; vA = a;\n    }', 'vCol = col; vA = a*((st < .5 && aHi < .5) ? uGlowOpen : uGlow);\n    }'],
@@ -1095,10 +1198,11 @@
     g.setAttribute('aNs', new THREE.BufferAttribute(nsF, 1));
     g.setAttribute('aDepth', new THREE.BufferAttribute(dF, 1));
     g.setAttribute('aHi', new THREE.BufferAttribute(S.hiF, 1).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aSpine', new THREE.BufferAttribute(new Float32Array(n), 1));   // 1 = reached by the spine tree (filled when that layout is first loaded)
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, maxD * yStep / 2, 0), 60);
     ptsMat = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false,
-      uniforms: { uSize: { value: 0.03 }, uTime: { value: 0 }, uMode: { value: 0 }, uHideOpen: { value: 0 }, uHiOn: { value: 0 }, uScale: { value: 1 }, uHiA: { value: 1 }, uHiS: { value: 1 }, uHiOnly: { value: 0 } },
+      uniforms: { uSize: { value: 0.03 }, uTime: { value: 0 }, uMode: { value: 0 }, uHideOpen: { value: 0 }, uHiOn: { value: 0 }, uScale: { value: 1 }, uHiA: { value: 1 }, uHiS: { value: 1 }, uHiOnly: { value: 0 }, uSpine: { value: 0 } },
     });
     pts = new THREE.Points(g, ptsMat); pts.frustumCulled = false; world.add(pts);
     // halo: the SAME geometry (no extra buffers) and the SAME uniform objects, drawn bigger/softer/additive on top
@@ -1258,7 +1362,7 @@
   function toggleUI() {
     S.uiHidden = !S.uiHidden; if (S.uiHidden && hoverMark) hoverMark.visible = false;
     panelsEl.object3D.visible = !S.uiHidden;
-    for (const m of rulers) m.visible = !S.uiHidden;      // the "depth 25" labels are UI too
+    for (const m of rulers) m.visible = !S.uiHidden;      // the "depth 25" labels are UI too (spineTick hides them in the spine layout)
     const hud = $('hud'); if (hud) hud.style.display = S.uiHidden ? 'none' : '';
     const vrb = document.querySelector('.a-enter-vr'); if (vrb) vrb.style.display = S.uiHidden ? 'none' : '';
   }
@@ -1748,7 +1852,7 @@
     }
     ribbons.material.uniforms.uTime.value = t / 1000; ribbons.material.uniforms.uWorldScale.value = world.scale.x;
     fibers.material.uniforms.uTime.value = t / 1000; fibers.material.uniforms.uWorldScale.value = world.scale.x; for (const c of cores) c.shellMat.uniforms.uDockT.value = t / 1000;
-    morphTick(dt); grabTick(); coreTick(t, dt); beaconTick(t, dt); debugTick();
+    morphTick(dt); spineTick(t); grabTick(); coreTick(t, dt); beaconTick(t, dt); debugTick();
     // adaptive quality: in VR, if frames stay slow (< ~42 fps) for 3 s, take the glow down one level (the saved choice is untouched; G raises it again)
     if (dtMs > 0 && dtMs < 500) {
       S.frameMs = S.frameMs ? S.frameMs * 0.9 + dtMs * 0.1 : dtMs;
@@ -1767,7 +1871,7 @@
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
     const el = $('loading'); if (el) el.remove();
-    window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
+    window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, spine: () => spine, spineAmount, SPINE, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }
   boot();
 })();

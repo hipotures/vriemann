@@ -293,4 +293,26 @@ t('pickSolids: live first, then connected nearest to the selection, capped; sele
   assert(!L.pickSolids(hi, pos, 0, [0, 4], 10).some((e) => e.i === 0), 'a compiling selected module stays the core, no bubble inside it');
   assert.strictEqual(L.pickSolids(hi, pos, 0, [1, 2, 3], 2).length, 2, 'the cap also holds for live ones');
 });
+t('buildSpine: one trunk curve through every trunk node plus one ribbon per branch, finite, tapering, aG runs down the tree', () => {
+  const nodes = [{ p: [0, 10, 0], up: -1, lv: 0 }, { p: [0.5, 5, 0], up: 0, lv: 0 }, { p: [0, 0, 0.5], up: 1, lv: 0 },
+    { p: [3, 5, 0], up: 1, lv: 1 }, { p: [4, 4, 1], up: 3, lv: 2 }];
+  const b = L.buildSpine(nodes, { sub: 4, segs: 6 });
+  assert.strictEqual(b.trunkSteps, 3); assert.strictEqual(b.curves, 3);
+  const trunkV = (2 * 4 + 1) * 2, branchV = 7 * 2; assert.strictEqual(b.vertexCount, trunkV + 2 * branchV); assert.strictEqual(b.indexCount, (8 + 6 + 6) * 6);
+  assert(b.pos.every(Number.isFinite) && b.tan.every(Number.isFinite)); assert(Math.max(...b.index) < b.vertexCount);
+  const at = (v) => [b.pos[3 * v], b.pos[3 * v + 1], b.pos[3 * v + 2]];
+  assert.deepStrictEqual(at(0), [0, 10, 0]); assert.deepStrictEqual(at(2 * 4), [0.5, 5, 0]); assert.deepStrictEqual(at(trunkV - 1), [0, 0, 0.5]);   // the nodes themselves are exact
+  assert.deepStrictEqual(at(trunkV), [0.5, 5, 0]); assert.deepStrictEqual(at(trunkV + branchV - 1), [3, 5, 0]);                                     // a branch: parent -> node
+  assert(b.w[trunkV] > b.w[trunkV + branchV - 1] && b.w[0] > b.w[trunkV], 'branches are thinner than the trunk and taper');
+  assert.strictEqual(b.g[0], 0); assert.strictEqual(b.g[trunkV - 1], 1); assert(Math.abs(b.g[trunkV] - 0.5) < 1e-6, 'a branch flashes when the flash passes its trunk step');
+  assert.deepStrictEqual([...new Set(b.lv)].sort(), [0, 1, 2]);
+});
+if (fs.existsSync(path.join(D, 'spine.json'))) t('spine data: trunk from riemannHypothesis in Main, every node in range, positions finite, Main on top', () => {
+  const js = JSON.parse(fs.readFileSync(path.join(D, 'spine.json'))), reached = fs.readFileSync(path.join(D, 'spine.bin')), sp = f32('pos_spine.f32');
+  assert.strictEqual(js.nodes[0].n, 'riemannHypothesis'); assert.strictEqual(names[js.nodes[0].m], 'Main'); assert.strictEqual(js.nodes[0].up, -1);
+  assert.strictEqual(reached.length, n); assert.strictEqual(sp.length, 3 * n); assert(sp.every(Number.isFinite));
+  js.nodes.forEach((nd, k) => { assert(nd.m >= 0 && nd.m < n && reached[nd.m] === 1); assert(nd.up < k, 'parents come first'); assert(nd.lv === 0 || nd.lv === js.nodes[nd.up].lv + 1 || js.nodes[nd.up].lv === 0); });
+  const main = names.indexOf('Main'); assert.deepStrictEqual([...sp.slice(3 * main, 3 * main + 3)].map((x) => +x.toFixed(2)), js.nodes[0].p.map((x) => +x.toFixed(2)));
+  const b = L.buildSpine(js.nodes); assert(b.pos.every(Number.isFinite)); assert.strictEqual(b.trunkSteps, js.steps);
+});
 console.log(ok + ' tests passed');
