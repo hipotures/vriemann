@@ -9,7 +9,7 @@
 
   // ------------------------------------------------------------------ state
   const S = {
-    layout: 'tower', builtNow: new Set(), links: 'fibers', layoutTarget: 'tower', layouts: {}, layoutLoading: false, layoutError: '', morph: null, glow: 1, fov: 80, bringPrev: null, glowAuto: false, frameMs: 0, slowMs: 0, yawTarget: null, ys: { v: 0 }, decls: [], hoverSat: -1, hand: 'right', scale: 0.08, grab: null, uiHidden: false, followTarget: -1, fs: { v: 0 }, nodeDist: { right: null, left: null }, lastNodeDist: null,
+    uiMode: 0, layout: 'tower', builtNow: new Set(), links: 'fibers', layoutTarget: 'tower', layouts: {}, layoutLoading: false, layoutError: '', morph: null, glow: 1, fov: 80, bringPrev: null, glowAuto: false, frameMs: 0, slowMs: 0, yawTarget: null, ys: { v: 0 }, decls: [], hoverSat: -1, hand: 'right', scale: 0.08, grab: null, uiHidden: false, followTarget: -1, fs: { v: 0 }, nodeDist: { right: null, left: null }, lastNodeDist: null,
     n: 0, meta: null, pos: null, depth: null, ns: null, pk: null, ids: null, names: null, nameIdx: null,
     csr: null, st: null, stF: null, hiF: null,
     view: 'tower', color: 0, hideOpen: false, closureOn: true, closureOnly: false, follow: false, followStill: false, mini: false,
@@ -253,7 +253,7 @@
 
   // ------------------------------------------------------------------ shaders
   const VERT = `
-    uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly, uSpine;
+    uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly, uSpine, uSpineBare;
     attribute float aState, aNs, aDepth, aHi, aSolid, aSpine;
     varying vec3 vCol; varying float vA;
     vec3 hsv2rgb(vec3 c){ vec4 K=vec4(1.,2./3.,1./3.,3.); vec3 p=abs(fract(c.xxx+K.xyz)*6.-K.www); return c.z*mix(K.xxx,clamp(p-K.xxx,0.,1.),c.y); }
@@ -277,6 +277,8 @@
       if (uSpine > 0.) {                                            // spine layout: reached modules glow violet, the rest is faint dust
         if (aSpine > .5) { col = mix(col, vec3(1.,.55,1.), .6*uSpine); }
         else { col = mix(col, vec3(.30,.27,.42), uSpine); a *= 1. - .6*uSpine; size *= 1. - .35*uSpine; }
+        if (uSpineBare > 1.5 && aHi < .5 && uSpine > .5) { gl_Position = vec4(2.,2.,2.,1.); gl_PointSize = 0.; vCol = col; vA = 0.; return; }   // Closure: only -> the bare tree
+        if (uSpineBare > .5 && aHi < .5) a *= 1. - .75*uSpine;                    // Closure: dim -> the dots fade out of the way
       }
       if (aHi > .5) {
         if (aHi < 1.5) col = vec3(0.,1.,1.); else if (aHi < 2.5) col = vec3(1.,.3,.9); else { col = vec3(1.); size *= 3.; }
@@ -326,7 +328,7 @@
   /** same colour logic as the dots, but bigger, soft (gaussian) and additive; open dots only get a halo on the "all" level */
   function derive(src, pairs) { let o = src; for (const [a, b] of pairs) { if (!o.includes(a)) throw new Error('shader derivation failed: ' + a.slice(0, 50)); o = o.replace(a, b); } return o; }
   const HALO_VERT = derive(VERT, [
-    ['uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly, uSpine;', 'uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly, uSpine, uGlow, uGlowOpen, uHaloScale;'],
+    ['uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly, uSpine, uSpineBare;', 'uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly, uSpine, uSpineBare, uGlow, uGlowOpen, uHaloScale;'],
     ['if (uHideOpen > .5 && st < .5 && aHi < .5) {', 'if ((uHideOpen > .5 || uGlowOpen <= 0.) && st < .5 && aHi < .5) {'],
     ['size*projectionMatrix[1][1]*500./max(-mv.z,.05), 2.2, 26.)', 'size*uHaloScale*projectionMatrix[1][1]*500./max(-mv.z,.05), 4., 28.)'],
     ['vCol = col; vA = a;\n    }', 'vCol = col; vA = a*((st < .5 && aHi < .5) ? uGlowOpen : uGlow);\n    }'],
@@ -495,7 +497,7 @@
       if (S.glowAuto) text(c, 'Glow lowered automatically: the frame rate was too low', 40, y + (blocked ? 292 : 266), { size: 20, color: '#ffb454' });
     } else {
     text(c, 'Hide open: hide dots that are not built yet', 40, y + 266, { size: 20, color: '#7f8fb3' });
-    text(c, 'Closure (C): off / dim the rest / only = hide everything but the selection + its imports', 40, y + 292, { size: 20, color: '#7f8fb3' });
+    text(c, S.layoutTarget === 'spine' ? 'Closure (C) in the spine: off / dim the dots / only = the bare tree (+ the selection)' : 'Closure (C): off / dim the rest / only = hide everything but the selection + its imports', 40, y + 292, { size: 20, color: '#7f8fb3' });
     text(c, 'Miniature: grip / pinch-drag moves it · stick ▲▼ = size', 40, y + 318, { size: 20, color: '#7f8fb3' });
     text(c, blocked ? `Sound is BLOCKED by the browser (audio ${snd.ctxState}): press any key / trigger / click once` : `Sound (N): bed follows CPU/RAM, a note per built module, a chord per packet · volume ${Math.round(snd.volume * 100)}%`, 40, y + 344, { size: 20, color: blocked ? '#ffb454' : '#7f8fb3' });
     text(c, S.glowAuto ? 'Glow lowered automatically: the frame rate was too low (G to raise)' : 'Glow (G): soft halo on built / active dots · "all" adds a faint one to open dots', 40, y + 370, { size: 20, color: S.glowAuto ? '#ffb454' : '#7f8fb3' });
@@ -1233,7 +1235,7 @@
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, maxD * yStep / 2, 0), 60);
     ptsMat = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false,
-      uniforms: { uSize: { value: 0.03 }, uTime: { value: 0 }, uMode: { value: 0 }, uHideOpen: { value: 0 }, uHiOn: { value: 0 }, uScale: { value: 1 }, uHiA: { value: 1 }, uHiS: { value: 1 }, uHiOnly: { value: 0 }, uSpine: { value: 0 } },
+      uniforms: { uSize: { value: 0.03 }, uTime: { value: 0 }, uMode: { value: 0 }, uHideOpen: { value: 0 }, uHiOn: { value: 0 }, uScale: { value: 1 }, uHiA: { value: 1 }, uHiS: { value: 1 }, uHiOnly: { value: 0 }, uSpine: { value: 0 }, uSpineBare: { value: 0 } },
     });
     pts = new THREE.Points(g, ptsMat); pts.frustumCulled = false; world.add(pts);
     // halo: the SAME geometry (no extra buffers) and the SAME uniform objects, drawn bigger/softer/additive on top
@@ -1341,6 +1343,7 @@
     const hiOn = (S.closureOn && S.sel >= 0 || S.selPk >= 0);
     ptsMat.uniforms.uHiOn.value = hiOn ? 1 : 0;
     ptsMat.uniforms.uHiOnly.value = hiOn && S.closureOnly ? 1 : 0;      // 'only' needs something selected, or everything would vanish
+    ptsMat.uniforms.uSpineBare.value = !S.closureOn ? 0 : S.closureOnly ? 2 : 1;   // in the spine 'only' may hide every dot (the bare tree) - spineTick scales it with the layout
   }
   function setView(v) {
     S.view = v; pts.visible = solids.visible = v === 'tower'; pkPts.visible = v === 'packets'; applyGlow(); rebuildSolids();
@@ -1390,8 +1393,12 @@
     if (S.hoverBtn) { S.hoverBtn.panel.dirty = true; S.hoverBtn = null; }
     if (panels.info) panels.info.dirty = true;
   }
-  function toggleUI() {
-    S.uiHidden = !S.uiHidden; if (S.uiHidden && hoverMark) hoverMark.visible = false;
+  /** UI mode: 0 everything shown, 1 panels + labels hidden but the controller beams (and the hover marker) stay, 2 all hidden.
+   *  VR Y cycles 0 -> 1 -> 2 -> 0 (aiming at the tree with the panels out of the way); the H / Y keys toggle 0 <-> 2 (no beams on a desktop). */
+  function cycleUI() { setUIMode((S.uiMode + 1) % 3); }
+  function toggleUI() { setUIMode(S.uiMode ? 0 : 2); }
+  function setUIMode(m) {
+    S.uiMode = m; S.uiHidden = m > 0; if (m === 2 && hoverMark) hoverMark.visible = false;
     panelsEl.object3D.visible = !S.uiHidden;
     for (const m of rulers) m.visible = !S.uiHidden;      // the "depth 25" labels are UI too (spineTick hides them in the spine layout)
     const hud = $('hud'); if (hud) hud.style.display = S.uiHidden ? 'none' : '';
@@ -1636,7 +1643,7 @@
     const r = pickInWorld(o, d);
     if (S.view === 'tower') {
       if (r.node !== S.hover || r.sk !== S.hoverSk) { S.hover = r.node; S.hoverSk = r.sk; panels.info.dirty = true; }
-      hoverMark.visible = r.node >= 0 && !S.uiHidden;
+      hoverMark.visible = r.node >= 0 && S.uiMode < 2;
       if (r.sk >= 0) { const q = spine.list[r.sk].p; hoverMark.position.set(q[0], q[1], q[2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
       else if (r.node >= 0) { hoverMark.position.set(S.pos[3 * r.node], S.pos[3 * r.node + 1], S.pos[3 * r.node + 2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
       if (click && r.node >= 0) { stopFollow(); S.pendingDecl = r.sk >= 0 ? spine.list[r.sk].n : null; if (r.node !== S.sel) select(r.node); else gotoPendingDecl(); spineSelect(r.sk); }
@@ -1644,7 +1651,7 @@
       return r.node >= 0 ? 'node' : 'none';
     } else {
       if (r.pk !== S.hoverPk) { S.hoverPk = r.pk; panels.info.dirty = true; }
-      hoverMark.visible = r.pk >= 0 && !S.uiHidden;
+      hoverMark.visible = r.pk >= 0 && S.uiMode < 2;
       if (r.pk >= 0) { hoverMark.position.set(S.pkPos[3 * r.pk], S.pkPos[3 * r.pk + 1], S.pkPos[3 * r.pk + 2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
       if (click && r.pk >= 0) selectPacket(r.pk);
       else if (click && (S.sel >= 0 || S.selPk >= 0)) clearSel();
@@ -1724,7 +1731,7 @@
     for (const [id] of PTR) {
       if (!beams[id]) beams[id] = makeBeam(scene.object3D);
       const b = beams[id], p = live[id];
-      b.grp.visible = !!p && !S.uiHidden;
+      b.grp.visible = !!p && S.uiMode < 2;                                 // UI mode 1 keeps the beams
       if (!p) continue;
       if (p.kind === 'ctrl') { const ln = p.el.getObject3D && p.el.getObject3D('line'); if (ln) ln.visible = false; }   // hide A-Frame's own (mis-clipped) line
       const r = p.ray, ph = panelHit(r.o, r.d);
@@ -1776,7 +1783,7 @@
       el.addEventListener('abuttondown', recenter);
       el.addEventListener('bbuttondown', () => { toggleMini(); });
       el.addEventListener('xbuttondown', toggleFollow);
-      el.addEventListener('ybuttondown', toggleUI);
+      el.addEventListener('ybuttondown', cycleUI);
     }
     rc.addEventListener('thumbstickmoved', (e) => { S.hand = 'right'; S.ax.rx = e.detail.x; S.ax.ry = e.detail.y; });
     lc.addEventListener('thumbstickmoved', (e) => { S.hand = 'left'; S.ax.lx = e.detail.x; S.ax.ly = e.detail.y; });
@@ -1910,7 +1917,7 @@
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
     const el = $('loading'); if (el) el.remove();
-    window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, spine: () => spine, spineAmount, SPINE, pickInWorld, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
+    window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, spine: () => spine, spineAmount, SPINE, pickInWorld, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, cycleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }
   boot();
 })();

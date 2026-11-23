@@ -311,10 +311,14 @@ load('lib.js'); load('audio.js'); load('app.js');
     assert(ents.lc.listeners.ybuttondown && ents.lc.listeners.ybuttondown.length === 1, 'exactly one ybuttondown handler expected, got ' + (ents.lc.listeners.ybuttondown || []).length);
     assert(ents.rc.listeners.abuttondown.length === 1 && ents.rc.listeners.bbuttondown.length === 1 && ents.lc.listeners.xbuttondown.length === 1);
     assert(ents.panels.object3D.visible);
-    ents.lc.listeners.ybuttondown[0]({ detail: {} }); assert(!ents.panels.object3D.visible, 'Y did not hide the panels');
-    ents.lc.listeners.ybuttondown[0]({ detail: {} }); assert(ents.panels.object3D.visible, 'Y did not show the panels again');
-    // pressing Y on the right entity too must not double-toggle (an event reaching both entities would cancel itself out)
-    ents.lc.listeners.ybuttondown[0](); ents.rc.listeners.ybuttondown[0](); assert(ents.panels.object3D.visible, 'two Y events cancel out - expected');
+    // VR Y cycles three states: panels + labels hidden but beams kept -> everything hidden incl. beams -> everything back
+    ents.lc.listeners.ybuttondown[0]({ detail: {} }); assert(!ents.panels.object3D.visible && S.uiMode === 1, 'Y #1: panels hidden, beams kept');
+    ents.lc.listeners.ybuttondown[0]({ detail: {} }); assert(!ents.panels.object3D.visible && S.uiMode === 2, 'Y #2: panels and beams hidden');
+    ents.lc.listeners.ybuttondown[0]({ detail: {} }); assert(ents.panels.object3D.visible && S.uiMode === 0, 'Y #3: everything back');
+    // the keyboard (no beams on a desktop) toggles all / nothing
+    winL.keydown.forEach((f) => f({ code: 'KeyH' })); assert.strictEqual(S.uiMode, 2); winL.keydown.forEach((f) => f({ code: 'KeyH' })); assert.strictEqual(S.uiMode, 0);
+    // a Y event reaching the right entity too counts as a press as well (three of them come back around)
+    ents.lc.listeners.ybuttondown[0](); ents.rc.listeners.ybuttondown[0](); ents.lc.listeners.ybuttondown[0](); assert(ents.panels.object3D.visible, 'three Y events come back around');
   });
   await t('Follow/jump turns the tower so the module ends up straight ahead (inside: where the camera looks; miniature: facing the viewer)', () => {
     const w = ents.world.object3D, ang = (x, z) => Math.atan2(-x, -z), diff = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
@@ -574,6 +578,13 @@ load('lib.js'); load('audio.js'); load('app.js');
     assert(sp.labels.children.some((l) => l.userData.text === sp.root), 'the root is labelled'); assert(sp.labels.children.some((l) => l.userData.legend), 'legend shown');
     for (const l of sp.labels.children) { assert(!l.material.sizeAttenuation, 'labels keep their size on screen, not in the world (the trunk passes right by the viewer)'); assert(l.scale.y > 0 && l.scale.y < 0.1, 'labels are small: ' + l.scale.y); }
     assert(RH.rulers.every((m) => !m.visible), 'depth rulers hidden in the spine');
+    // Closure in the spine: off -> dim the dots -> only = the bare tree (no dots at all when nothing is selected)
+    const keepC = [S.closureOn, S.closureOnly], u = RH.halo().ptsMat.uniforms; panels.info.dirty = true; frame(); const hadSel = S.sel;
+    if (S.sel >= 0) panels.info.buttons.find((b) => b.label === 'Clear').fn();
+    S.closureOn = false; S.closureOnly = false; RH.cycleClosure(); assert.strictEqual(u.uSpineBare.value, 1, 'dim');
+    RH.cycleClosure(); assert.strictEqual(u.uSpineBare.value, 2, 'only = bare tree'); assert.strictEqual(u.uHiOnly.value, 0, 'nothing selected: the old only-mode stays off');
+    RH.cycleClosure(); assert.strictEqual(u.uSpineBare.value, 0, 'off');
+    [S.closureOn, S.closureOnly] = keepC; RH.cycleClosure(); RH.cycleClosure(); RH.cycleClosure(); if (hadSel >= 0) RH.select(hadSel);
     const mi = RH.mainIdx(), top = S.layouts.spine; assert(top[3 * mi + 1] > 19, 'Main (riemannHypothesis) sits on top of the trunk');
     // a branch node is clickable: aim at it, trigger -> its module is selected and the code scrolls to that declaration
     panels.info.dirty = true; frame(); panels.info.buttons.find((b) => b.label === 'Clear').fn(); frame(16, 80);   // no old selection (its sphere's satellites would catch the ray)
