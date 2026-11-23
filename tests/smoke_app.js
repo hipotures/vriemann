@@ -626,7 +626,8 @@ load('lib.js'); load('audio.js'); load('app.js');
     let flagged = 0; for (const v of RH.halo().pts.geometry.attributes.aSpine.array) flagged += v; assert.strictEqual(flagged, s2.reached, 'dots flagged for this level');
     const t0 = Date.now(); press('KeyP'); await waitMorph(); frame(16, 2); const s3 = RH.spine(); console.log('     full level built + morphed in ' + (Date.now() - t0) + ' ms, ' + s3.nodes + ' nodes');
     assert.strictEqual(S.layout, 'spine3'); assert.strictEqual(s3.kind, 'module'); assert.strictEqual(s3.reached, S.n, 'full: every module is on the tree');
-    assert(s3.mesh.material.uniforms.uGain.value < 0.5, 'the 175k branches are dimmer'); assert(s3.list[s3.steps].n && s3.list[s3.steps].n === S.names[s3.list[s3.steps].m].split('.').pop(), 'module branches carry the module name');
+    { const ad = s3.mesh.geometry.attributes.aDim.array; let lo = 1; for (const v of ad) lo = Math.min(lo, v); assert(lo < 0.05 && ad[0] === 1, 'the packed core is dimmed by density, the trunk is not: ' + lo); }
+    { const ad = s2.mesh.geometry.attributes.aDim.array; assert(ad.every((v) => v === 1), 'dense keeps its brightness'); } assert(s3.list[s3.steps].n && s3.list[s3.steps].n === S.names[s3.list[s3.steps].m].split('.').pop(), 'module branches carry the module name');
     // a module branch is clickable: its module is selected and its whole sub-tree lit
     const kn = s3.list.findIndex((x, k) => x.lv === 2), world = ents.world.object3D; S.focus = s3.list[kn].p[1]; frame(16, 2); world.updateMatrixWorld(true);
     if (S.sel >= 0) panels.info.buttons.find((b) => b.label === 'Clear').fn();

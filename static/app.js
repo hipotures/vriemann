@@ -88,16 +88,16 @@
   // names (sampled, up to 4 levels); dust = modules the tree never reaches (dimmed).  The modules themselves move like in any other layout
   // (a module sits on its first node); on top of them one additive ribbon mesh draws the tree, with a flash running down it now and then.
   // gain: brightness of the branches per level (additive: 175k module branches at full strength would be a white wall); segs: samples per branch
-  const SPINE = { halo: 3.0, minPx: 1.6, flashSec: 14, labelH: 0.025, labelEvery: 6, labelsLv1: 10, gain: { spine: 1, spine2: 0.7, spine3: 0.16 }, segs: { spine: 10, spine2: 8, spine3: 2 } };   // labelH: one text line on screen (~1.5% of the view height, like the I labels), constant while zooming
+  const SPINE = { halo: 3.0, minPx: 1.6, flashSec: 14, labelH: 0.025, labelEvery: 6, labelsLv1: 10, gain: { spine: 1, spine2: 0.7, spine3: 1 }, dimCell: 0.5, dimK: 4, segs: { spine: 10, spine2: 8, spine3: 2 } };   // labelH: one text line on screen (~1.5% of the view height, like the I labels), constant while zooming
   // the spine wind: one displacement per moving node in a float texture (uWindW x uWindH texels), looked up by slot
   const WIND_AT = `vec3 windAt(float i){ vec2 uv = vec2(mod(i, uWindW) + .5, floor(i/uWindW) + .5)/vec2(uWindW, uWindH); return texture2D(uWindTex, uv).xyz; }`;
   const spines = {};                     // level name -> its tree, built on first use
   let spine = null;                       // the level shown (most) right now: picking, highlighting and the info panel use it
   const SPINE_V = `
-    attribute vec3 aTan; attribute float aSide, aT, aG, aW, aLv, aHot, aN0, aN1, aF;
+    attribute vec3 aTan; attribute float aSide, aT, aG, aW, aLv, aHot, aN0, aN1, aF, aDim;
     uniform float uWorldScale, uMinPx, uHalo;
     uniform sampler2D uWindTex; uniform float uWindW, uWindH, uWind;
-    varying float vSide, vT, vG, vLv, vHot;
+    varying float vSide, vT, vG, vLv, vHot, vDim;
     ${WIND_AT}
     void main(){
       vec3 pp = position; if (uWind > 0.) pp += uWind*mix(windAt(aN0), windAt(aN1), aF);   // the two joints it lies between drag it along
@@ -106,14 +106,14 @@
       vec3 sv = cross(tv, normalize(mv.xyz)); float sl = length(sv); sv = sl > 1e-4 ? sv/sl : vec3(1., 0., 0.);   // across, facing the eye
       float w = max(aW*uHalo*uWorldScale, uMinPx*max(-mv.z, .05)/(projectionMatrix[1][1]*500.));
       mv.xyz += sv*aSide*w;
-      vSide = aSide; vT = aT; vG = aG; vLv = aLv; vHot = aHot;
+      vSide = aSide; vT = aT; vG = aG; vLv = aLv; vHot = aHot; vDim = aDim;
       gl_Position = projectionMatrix*mv;
     }`;
   // a wide violet haze, a pink body and a thin white-hot core (the trunk's core is the brightest), all additive: where branches cross
   // they add up to white, like the poster.  A flash runs down the whole tree every SPINE.flashSec seconds; the trunk flickers a little.
   const SPINE_F = `
     uniform float uTime, uAlpha, uFlashSec, uHotOn, uGain;
-    varying float vSide, vT, vG, vLv, vHot;
+    varying float vSide, vT, vG, vLv, vHot, vDim;
     void main(){
       float s2 = vSide*vSide, trunk = 1. - step(.5, vLv);
       float core = exp(-s2*45.), body = exp(-s2*9.), haze = exp(-s2*2.2);
@@ -122,7 +122,7 @@
       float tip = trunk > .5 ? 1. : 1. - .5*vT;
       float ends = smoothstep(0., .04, vT) + trunk;                                // branches grow out of the trunk, no blob at the joint
       vec3 col = vec3(.50, .26, .92)*haze*.30 + vec3(1., .36, 1.)*body*(.45 + .25*trunk) + vec3(1., .92, 1.)*core*(.30 + .95*trunk);
-      col *= tip*flick*(1. + 1.6*flash)*min(ends, 1.)*mix(uGain, 1., trunk);
+      col *= tip*flick*(1. + 1.6*flash)*min(ends, 1.)*mix(uGain*vDim, 1., trunk);
       if (uHotOn > .5) col *= vHot > .5 ? 1.9 : .16;                              // a selected branch (and what hangs from it) stands out
       gl_FragColor = vec4(col, uAlpha);
     }`;
@@ -141,6 +141,16 @@
     const a0 = new Float32Array(b.vertexCount), a1 = new Float32Array(b.vertexCount);
     for (let v = 0; v < b.vertexCount; v++) { a0[v] = plan.tex[b.n0[v]]; a1[v] = plan.tex[b.n1[v]]; }
     g.setAttribute('aN0', new THREE.BufferAttribute(a0, 1)); g.setAttribute('aN1', new THREE.BufferAttribute(a1, 1)); g.setAttribute('aF', new THREE.BufferAttribute(b.f, 1));
+    // density: on the full level a branch shines the less the more branches end in its 0.5 m cell, so the packed core of 175k additive
+    // ribbons stays about as bright as the dense level instead of a white wall, while the sparse outskirts keep full strength
+    const dim = new Float32Array(js.nodes.length).fill(1);
+    if (js.kind === 'module') {
+      const c = SPINE.dimCell, key = (q) => Math.floor(q[0] / c) + ',' + Math.floor(q[1] / c) + ',' + Math.floor(q[2] / c), cnt = new Map();
+      for (const nd of js.nodes) { const k = key(nd.p); cnt.set(k, (cnt.get(k) || 0) + 1); }
+      js.nodes.forEach((nd, k) => { if (nd.lv > 1) dim[k] = Math.min(1, SPINE.dimK / cnt.get(key(nd.p))); });
+    }
+    const ad = new Float32Array(b.vertexCount); for (let v = 0; v < b.vertexCount; v++) ad[v] = dim[b.node[v]];
+    g.setAttribute('aDim', new THREE.BufferAttribute(ad, 1));
     const dotNode = new Float32Array(S.n).fill(-1); for (let k = js.nodes.length - 1; k >= 0; k--) dotNode[js.nodes[k].m] = plan.tex[k];   // first node wins
     g.setIndex(new THREE.BufferAttribute(b.index, 1));
     const mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({ vertexShader: SPINE_V, fragmentShader: SPINE_F, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
