@@ -54,7 +54,7 @@ A-Frame's **F** shortcut ("enter VR", which on a desktop without a headset only 
 In the headset the menu leaves out the keyboard help (only warnings such as blocked sound remain); on the desktop the key hint sits on a dark backing.
 
 ## Recording, miniature, hands
-- **H or Y** (keyboard) – hides/shows the whole interface: panels, labels, hint and VR button. **Y** (left controller) cycles three states: panels and labels off but the controller beams stay (to aim at things without the panels in the way) → everything off, beams too (for recordings) → everything on. For recordings.
+- **H or Y** (keyboard) – hides/shows the whole interface: panels, labels, hint and VR button. **Y** (left controller) cycles three states: panels and labels off but the controller beams stay (to aim at things without the panels in the way) → everything off, beams too (for recordings) → everything on.
 - **Miniature** (B / M): the tower on a table. **Grip** on a controller or a **pinch in empty space** with a hand grabs it to move/rotate it;
   right stick ▲▼ (desktop: wheel) changes its size; **Bring to me** slides the tower's axis into your head (at the height of the selected module) –
   the points surround your head up close. The "depth" labels flip by themselves: readable from outside when you are outside, from inside when inside.
