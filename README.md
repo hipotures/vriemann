@@ -85,8 +85,10 @@ and the modules sit in a tube of radius ~0.9 m around it. The layouts (`data/pos
 **Spine**: the proof as a lightning tree of *declarations*, not modules. The **trunk** is a chain from `riemannHypothesis` (Main, on top)
 down to the foundations, each step a declaration named in the proof of the one above it (`rhOfAll → allChi → everyCharacter → …`, ~60 steps);
 **branches** are a sample of the lemmas each step names, up to four levels; **dust** is every module the tree never reaches (dimmed, around it).
-It is drawn as one additive ribbon mesh (violet haze, pink body, white-hot core; a flash runs down the whole tree every 14 s), with labels
-on the root, every 6th trunk step and a few branches; the modules move onto their first node like in any other layout, so selecting still works.
+The tree stands 12 m in front of you (not around your head); rotating the world (right stick ◀▶) walks you around it, the elevator moves along it.
+It is drawn as one additive ribbon mesh (violet haze, pink body, white-hot core; a flash runs down the whole tree every 14 s), with small labels
+(constant size on screen) on the root, every 6th trunk step and a few branches. **Every node is clickable**: it selects the module the declaration
+lives in and scrolls its source to that declaration; the info line names the declaration you point at. The modules move onto their first node like in any other layout.
 It needs `python3 build_spine.py` once (reads the Lean sources of the volume, `--vol`; ~40 s), which writes `data/pos_spine.f32`, `spine.json` and `spine.bin`;
 without them L skips the spine. The dependency graph is approximate (a declaration's text up to the next one, identifiers resolved by short name
 to the same module, a direct import, or a transitively imported module). Tune the look with `SPINE` in `app.js`, the shape with the constants at the top of `build_spine.py`.

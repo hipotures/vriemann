@@ -13,7 +13,7 @@
     n: 0, meta: null, pos: null, depth: null, ns: null, pk: null, ids: null, names: null, nameIdx: null,
     csr: null, st: null, stF: null, hiF: null,
     view: 'tower', color: 0, hideOpen: false, closureOn: true, closureOnly: false, follow: false, followStill: false, mini: false,
-    sel: -1, selPk: -1, hover: -1, hoverPk: -1, hoverBtn: null, ancestors: 0, impCur: 0, conCur: 0,
+    sel: -1, selPk: -1, hover: -1, hoverPk: -1, hoverSk: -1, pendingDecl: null, hoverBtn: null, ancestors: 0, impCur: 0, conCur: 0,
     live: new Map(), dirtyState: false, lastUpload: 0, focus: 10, focusTarget: null,
     ax: { lx: 0, ly: 0, rx: 0, ry: 0 }, keys: { up: false, down: false },
     status: null, logLines: [], packetLines: [], pkStats: null,
@@ -80,7 +80,7 @@
   // trunk = a chain of declarations from riemannHypothesis down, each named in the proof of the previous one; branches = lemmas each step
   // names (sampled, up to 4 levels); dust = modules the tree never reaches (dimmed).  The modules themselves move like in any other layout
   // (a module sits on its first node); on top of them one additive ribbon mesh draws the tree, with a flash running down it now and then.
-  const SPINE = { halo: 3.0, minPx: 1.6, flashSec: 14, labelH: 0.13, labelEvery: 6, labelsLv1: 10 };
+  const SPINE = { halo: 3.0, minPx: 1.6, flashSec: 14, labelH: 0.025, labelEvery: 6, labelsLv1: 10 };   // labelH: one text line on screen (~1.5% of the view height, like the I labels), constant while zooming
   let spine = null;
   const SPINE_V = `
     attribute vec3 aTan; attribute float aSide, aT, aG, aW, aLv;
@@ -132,20 +132,21 @@
       cv.width = Math.ceil(tw + 2 * pad); cv.height = lines.length * (fs + 8) + 2 * pad;
       cx.font = `${fs}px ${MONO}`; cx.fillStyle = color; cx.textBaseline = 'top'; lines.forEach((l, i) => cx.fillText(l, pad, pad + i * (fs + 8)));
       const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, toneMapped: false, opacity: 0 }));
-      const k = h / (fs + 8); sp.scale.set(k * cv.width, k * cv.height, 1); sp.center.set(0, 0.5);     // h = height of one line
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, sizeAttenuation: false, toneMapped: false, opacity: 0 }));
+      sp.userData.w = h * cv.width / (fs + 8); sp.userData.h = h * cv.height / (fs + 8); sp.center.set(0, 0.5);   // h = one line, relative; scaled per frame
       sp.userData.text = lines.join('\n'); return sp;
     };
     for (const k of pick) {
-      const nd = js.nodes[k], sp = mkLabel(nd.n, nd.lv === 0 ? '#ffe6ff' : '#d9b8ff', SPINE.labelH * (nd.lv === 0 ? 1 : 0.8));
+      const nd = js.nodes[k], sp = mkLabel(nd.n, nd.lv === 0 ? '#ffe6ff' : '#d9b8ff', nd.lv === 0 ? 1 : 0.85);
       sp.position.set(nd.p[0] + 0.12, nd.p[1], nd.p[2]); sp.userData.node = k; labels.add(sp);
     }
     if (T) {
-      const top = js.nodes[0].p, leg = mkLabel('', '#b9a3d9', SPINE.labelH * 0.7, [`trunk = ${T}-step proof spine from ${js.nodes[0].n}`, 'branches = sampled lemmas each step names', 'dust = modules never reached']);
+      const top = js.nodes[0].p, leg = mkLabel('', '#b9a3d9', 0.8, [`trunk = ${T}-step proof spine from ${js.nodes[0].n}`, 'branches = sampled lemmas each step names', 'dust = modules never reached']);
       leg.position.set(top[0] + 0.12, top[1] + 1.2, top[2]); leg.userData.legend = true; labels.add(leg);
     }
     const sa = pts.geometry.attributes.aSpine; for (let i = 0; i < r.length; i++) sa.array[i] = r[i]; sa.needsUpdate = true;
-    spine = { mesh, labels, steps: T, nodes: js.nodes.length, reached: r.reduce((a, x) => a + x, 0), root: js.root };
+    const nodePos = new Float32Array(js.nodes.length * 3); js.nodes.forEach((nd, k) => nodePos.set(nd.p, 3 * k));
+    spine = { mesh, labels, steps: T, nodes: js.nodes.length, reached: r.reduce((a, x) => a + x, 0), root: js.root, list: js.nodes, nodePos };
     return spine;
   }
   /** how much of the spine is shown: 1 in the spine layout, 0 elsewhere, cross-fading with the morph; only in the tower view */
@@ -161,7 +162,8 @@
     if (!spine) return;
     const u = spine.mesh.material.uniforms; u.uAlpha.value = a; u.uTime.value = t / 1000; u.uWorldScale.value = world.scale.x;
     spine.mesh.visible = a > 0.002; spine.labels.visible = a > 0.002 && !S.uiHidden;
-    for (const sp of spine.labels.children) sp.material.opacity = a * (sp.userData.legend ? 0.8 : 0.95);
+    const k = SPINE.labelH * Math.tan((S.fov || 80) * Math.PI / 360) / Math.tan(40 * Math.PI / 180) / Math.max(world.scale.x, 1e-4);   // same rule as dbgScale
+    for (const sp of spine.labels.children) { sp.material.opacity = a * (sp.userData.legend ? 0.8 : 0.95); sp.scale.set(k * sp.userData.w, k * sp.userData.h, 1); }
   }
   function morphTick(dt) {
     const m = S.morph; if (!m) return;
@@ -622,7 +624,8 @@
       text(c, 'direct consumers magenta, and its Lean source opens.', 40, y + 118, { size: 24, color: '#93a4c3' });
     }
     const dh = S.hoverSat >= 0 && S.decls[S.hoverSat];
-    const h = dh ? `◆ ${dh.kind} ${dh.name || '(anonymous)'} · ${dh.lines} lines — click to jump` : S.view === 'tower' ? (S.hover >= 0 ? S.names[S.hover] : '') : (S.hoverPk >= 0 ? 'P' + String(S.hoverPk + 1).padStart(4, '0') : '');
+    const sn = S.hoverSk >= 0 && spine && spine.list[S.hoverSk];
+    const h = dh ? `◆ ${dh.kind} ${dh.name || '(anonymous)'} · ${dh.lines} lines — click to jump` : sn ? `${sn.lv ? 'lemma' : 'spine step'} ${sn.n} · ${S.names[sn.m]}` : S.view === 'tower' ? (S.hover >= 0 ? S.names[S.hover] : '') : (S.hoverPk >= 0 ? 'P' + String(S.hoverPk + 1).padStart(4, '0') : '');
     c.font = `22px ${MONO}`; text(c, fitLeft(c, h ? '→ ' + h : '', 830), 40, 446, { size: 22, font: MONO, color: '#ffd133' });
   }
 
@@ -687,7 +690,7 @@
       s.tok = L.tokenize(txt); s.red = L.countRed(s.tok); s.bytes = txt.length; s.lines = s.tok.length; s.hl = null;
       S.decls = L.declarations(s.tok); if (core && core.target === 1 && core.i === i) { core.decls = S.decls; coreSetDecls(core); paintCode(core, s.tok); }
     } catch (e) { s.error = String(e.message || e); }
-    s.loading = false; panels.source.dirty = true;
+    s.loading = false; panels.source.dirty = true; gotoPendingDecl();
   }
 
   // ---- live log panel
@@ -1084,6 +1087,11 @@
       if (dist2 < lim * lim && dist2 < bd) { bd = dist2; best = { k, dist: t }; }
     }
     return best;
+  }
+  /** a click on a spine node selects its module and then scrolls the code to that declaration (once the source is loaded) */
+  function gotoPendingDecl() {
+    const name = S.pendingDecl; if (!name || !S.src.tok) return; S.pendingDecl = null;
+    const k = S.decls.findIndex((d) => d.name === name || d.name.endsWith('.' + name)); if (k >= 0) jumpToDecl(k);
   }
   function jumpToDecl(k) {
     const d = S.decls[k], s = S.src; if (!d || !s.tok) return;
@@ -1564,7 +1572,11 @@
     world.updateMatrixWorld(true);
     tmpM.copy(world.matrixWorld).invert();
     const lo = o.clone().applyMatrix4(tmpM), ld = d.clone().transformDirection(tmpM);
-    if (S.view === 'tower') return { node: L.pickPoint(S.pos, S.n, lo, ld, S.st, S.hideOpen, 0.02), pk: -1 };
+    if (S.view === 'tower' && spine && spineAmount() > 0.5) {             // spine: the tree's nodes (declarations) first, then the dust
+      const k = L.pickPoint(spine.nodePos, spine.nodes, lo, ld, null, false, 0.025);
+      if (k >= 0) return { node: spine.list[k].m, pk: -1, sk: k };
+    }
+    if (S.view === 'tower') return { node: L.pickPoint(S.pos, S.n, lo, ld, S.st, S.hideOpen, 0.02), pk: -1, sk: -1 };
     return { node: -1, pk: L.pickPoint(S.pkPos, S.meta.packets, lo, ld, null, false, 0.05) };
   }
   function panelHit(o, d) {
@@ -1599,10 +1611,11 @@
     }
     const r = pickInWorld(o, d);
     if (S.view === 'tower') {
-      if (r.node !== S.hover) { S.hover = r.node; panels.info.dirty = true; }
+      if (r.node !== S.hover || r.sk !== S.hoverSk) { S.hover = r.node; S.hoverSk = r.sk; panels.info.dirty = true; }
       hoverMark.visible = r.node >= 0 && !S.uiHidden;
-      if (r.node >= 0) { hoverMark.position.set(S.pos[3 * r.node], S.pos[3 * r.node + 1], S.pos[3 * r.node + 2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
-      if (click && r.node >= 0) { stopFollow(); select(r.node); }
+      if (r.sk >= 0) { const q = spine.list[r.sk].p; hoverMark.position.set(q[0], q[1], q[2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
+      else if (r.node >= 0) { hoverMark.position.set(S.pos[3 * r.node], S.pos[3 * r.node + 1], S.pos[3 * r.node + 2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
+      if (click && r.node >= 0) { stopFollow(); S.pendingDecl = r.sk >= 0 ? spine.list[r.sk].n : null; if (r.node !== S.sel) select(r.node); else gotoPendingDecl(); }
       return r.node >= 0 ? 'node' : 'none';
     } else {
       if (r.pk !== S.hoverPk) { S.hoverPk = r.pk; panels.info.dirty = true; }
@@ -1871,7 +1884,7 @@
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
     const el = $('loading'); if (el) el.remove();
-    window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, spine: () => spine, spineAmount, SPINE, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
+    window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, spine: () => spine, spineAmount, SPINE, pickInWorld, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }
   boot();
 })();

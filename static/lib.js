@@ -327,7 +327,7 @@
     for (const c of curves) {
       const n = c.pts.length, base = v;
       for (let s = 0; s < n; s++) {
-        const pa = c.pts[Math.max(0, s - 1)], pb = c.pts[Math.min(n - 1, s + 1)];
+        const h = c.lv === 0 ? 3 : 1, pa = c.pts[Math.max(0, s - h)], pb = c.pts[Math.min(n - 1, s + h)];   // trunk: tangent over the zigzag, or the ribbon twists into blades
         let tx = pb[0] - pa[0], ty = pb[1] - pa[1], tz = pb[2] - pa[2]; const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
         const q = n > 1 ? s / (n - 1) : 0, width = c.lv === 0 ? c.w : c.w * (1 - 0.65 * q);
         for (let sd = 0; sd < 2; sd++, v++) {

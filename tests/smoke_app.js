@@ -572,8 +572,20 @@ load('lib.js'); load('audio.js'); load('app.js');
     assert.strictEqual(RH.halo().ptsMat.uniforms.uSpine.value, 1, 'points know they are in the spine (dust dimmed)');
     const aS = RH.halo().pts.geometry.attributes.aSpine.array; let reached = 0; for (const v of aS) reached += v; assert.strictEqual(reached, sp.reached, 'reached modules flagged');
     assert(sp.labels.children.some((l) => l.userData.text === sp.root), 'the root is labelled'); assert(sp.labels.children.some((l) => l.userData.legend), 'legend shown');
+    for (const l of sp.labels.children) { assert(!l.material.sizeAttenuation, 'labels keep their size on screen, not in the world (the trunk passes right by the viewer)'); assert(l.scale.y > 0 && l.scale.y < 0.1, 'labels are small: ' + l.scale.y); }
     assert(RH.rulers.every((m) => !m.visible), 'depth rulers hidden in the spine');
     const mi = RH.mainIdx(), top = S.layouts.spine; assert(top[3 * mi + 1] > 19, 'Main (riemannHypothesis) sits on top of the trunk');
+    // a branch node is clickable: aim at it, trigger -> its module is selected and the code scrolls to that declaration
+    panels.info.dirty = true; frame(); panels.info.buttons.find((b) => b.label === 'Clear').fn(); frame(16, 80);   // no old selection (its sphere's satellites would catch the ray)
+    const kn = sp.list.findIndex((nd) => nd.lv === 1), nd = sp.list[kn], world = ents.world.object3D; world.updateMatrixWorld(true);
+    S.focus = nd.p[1]; frame(16, 2); world.updateMatrixWorld(true); ents.panels.object3D.position.set(0, 0, 50); ents.panels.object3D.updateMatrixWorld(true);
+    const tgt = new THREE.Vector3(...nd.p).applyMatrix4(world.matrixWorld), o = new THREE.Vector3(0, 1.6, 0), d = tgt.clone().sub(o).normalize();
+    ents.rc.object3D.position.copy(o); ents.rc.object3D.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), d); ents.rc.object3D.updateMatrixWorld(true);
+    const comps = ents.rc.components; delete ents.rc.components;   // an earlier test gave the laser a tilted beam; aim along -Z here
+    ents.rc.listeners.triggerdown[0](); ents.rc.components = comps; assert.strictEqual(S.sel, nd.m, 'the node\'s module is selected: ' + S.names[S.sel] + ' for ' + nd.n);
+    await until(() => !S.src.loading && S.src.tok); frame(16, 2); assert(S.src.hl, 'the declaration ' + nd.n + ' is highlighted in the source');
+    assert(S.decls.some((x) => x.line === S.src.hl.from && x.name.endsWith(nd.n)), 'highlight is on ' + nd.n);
+    ents.panels.object3D.position.set(0, 0, 0); ents.panels.object3D.updateMatrixWorld(true);
     setView('packets'); frame(16, 2); assert(!sp.mesh.visible, 'no tree in the packets view'); setView('tower');
     await RH.setLayout('tower'); await waitMorph(); frame(16, 2); assert(!sp.mesh.visible && !sp.labels.visible, 'gone again in the tower'); assert(RH.rulers.some((m) => m.visible), 'rulers back');
     // no spine data: L goes helix8 -> tower and the menu says why it failed once

@@ -33,6 +33,7 @@ SPINE_LEN = 120                        # trunk steps at most
 BR = [16, 8, 4, 3]                     # branches sampled per node at level 0 (trunk), 1, 2, 3
 LEN = [(2.0, 5.0), (0.8, 2.2), (0.35, 1.0), (0.15, 0.5)]   # branch length range per level (world units, the tower is ~20 high)
 DUST_R, TOP_Y, BOT_Y = 13.0, 20.2, 0.6
+CENTER_Z = -12.0                       # the tree stands this far in front of the viewer (who stands on the tower's axis), not around their head
 PER_STEP = 45                          # nodes per trunk step at most (branches + twigs)
 
 meta = json.loads((DATA / "meta.json").read_text())
@@ -195,7 +196,7 @@ for i, d in enumerate(trunk):
     s = i / max(1, T - 1)
     y = TOP_Y + (BOT_Y - TOP_Y) * s
     x = 1.6 * math.sin(5.1 * s + ph[0]) + 0.6 * math.sin(13.0 * s + ph[1]) + rnd.gauss(0, 0.07)
-    z = 1.6 * math.sin(4.3 * s + ph[2]) + 0.6 * math.sin(11.0 * s + ph[3]) + rnd.gauss(0, 0.07)
+    z = CENTER_Z + 1.6 * math.sin(4.3 * s + ph[2]) + 0.6 * math.sin(11.0 * s + ph[3]) + rnd.gauss(0, 0.07)
     add(d, (x, y, z), i - 1 if i else -1, 0)
 
 def rand_dir(y_squash):
@@ -248,7 +249,7 @@ for i in range(n):
     if reached[i]:
         continue
     r = DUST_R * math.sqrt(0.08 + 0.92 * h01(i, 1)); th = 2 * math.pi * h01(i, 2)
-    pos[3 * i] = r * math.cos(th); pos[3 * i + 1] = depth[i] * meta["yStep"] + (h01(i, 3) - 0.5) * 0.4; pos[3 * i + 2] = r * math.sin(th)
+    pos[3 * i] = r * math.cos(th); pos[3 * i + 1] = depth[i] * meta["yStep"] + (h01(i, 3) - 0.5) * 0.4; pos[3 * i + 2] = CENTER_Z + r * math.sin(th)
 
 (DATA / "pos_spine.f32").write_bytes(pos.tobytes())
 (DATA / "spine.bin").write_bytes(bytes(reached))
