@@ -286,7 +286,8 @@
   //      the trunk is one Catmull-Rom curve through its nodes with a fine zigzag (the "lightning"), each branch a bowed quadratic arc
   //      from its parent.  Per vertex: aT = 0..1 along its own curve, aG = 0..1 down the whole tree (for the flash running down),
   //      aW = half-width in world units (branches taper to their tips), aLv = level; node[v] = the node a vertex belongs to (a branch
-  //      = the node at its end, the trunk = its nearest step), step[k] = the trunk step node k hangs from (both for picking / highlighting).
+  //      = the node at its end, the trunk = its nearest step), step[k] = the trunk step node k hangs from (both for picking / highlighting),
+  //      n0[v] / n1[v] / f[v] = the two nodes a vertex lies between and how far (a moving node drags its piece of curve with it).
   const hash2 = (a, b) => { const x = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return x - Math.floor(x); };
   function buildSpine(nodes, o) {
     o = Object.assign({ w: [0.06, 0.028, 0.016, 0.010, 0.007], sub: 10, segs: 10, jitter: 0.035, bow: 0.22 }, o || {});
@@ -323,7 +324,8 @@
     }
     let V = 0, I = 0; for (const c of curves) { V += c.pts.length * 2; I += (c.pts.length - 1) * 6; }
     const pos = new Float32Array(V * 3), tan = new Float32Array(V * 3), side = new Float32Array(V), t = new Float32Array(V),
-      g = new Float32Array(V), w = new Float32Array(V), lv = new Float32Array(V), index = new Uint32Array(I), node = new Int32Array(V);
+      g = new Float32Array(V), w = new Float32Array(V), lv = new Float32Array(V), index = new Uint32Array(I), node = new Int32Array(V),
+      n0 = new Int32Array(V), n1 = new Int32Array(V), f = new Float32Array(V);
     let v = 0, ii = 0;
     for (const c of curves) {
       const n = c.pts.length, base = v;
@@ -335,11 +337,46 @@
           pos.set(c.pts[s], 3 * v); tan[3 * v] = tx; tan[3 * v + 1] = ty; tan[3 * v + 2] = tz;
           side[v] = sd ? 1 : -1; t[v] = q; g[v] = c.g0 + (c.g1 - c.g0) * q; w[v] = width; lv[v] = c.lv;
           node[v] = c.node >= 0 ? c.node : trunk[Math.min(T - 1, Math.round(s / o.sub))];   // which node this piece belongs to (trunk: the nearest step)
+          if (c.node >= 0) { n0[v] = nodes[c.node].up; n1[v] = c.node; f[v] = q; }                // between which two nodes it lies (for the wind)
+          else { const sg = s / o.sub, i0 = Math.min(T - 1, Math.floor(sg)); n0[v] = trunk[i0]; n1[v] = trunk[Math.min(T - 1, i0 + 1)]; f[v] = sg - i0; }
         }
       }
       for (let s = 0; s < n - 1; s++) { const v0 = base + 2 * s; index.set([v0, v0 + 1, v0 + 2, v0 + 1, v0 + 3, v0 + 2], ii); ii += 6; }
     }
-    return { pos, tan, side, t, g, w, lv, node, step, index, curves: curves.length, trunkSteps: T, vertexCount: V, indexCount: I };
+    return { pos, tan, side, t, g, w, lv, node, n0, n1, f, step, index, curves: curves.length, trunkSteps: T, vertexCount: V, indexCount: I };
+  }
+
+  // ---- wind for the spine: the tree hangs from its root like a willow; every node is a joint that carries its parent's displacement
+  //      and adds its own small sway (proportional to its branch length, more on thinner branches), so the tips move most.
+  //      plan = windPlan(nodes, moving): which nodes move (moving(nd) -> bool; the others ride rigidly on their nearest moving ancestor)
+  //      and where each one's displacement lives (tex[k] = its slot, shared with that ancestor).  windStep fills d (4 floats per slot).
+  function windPlan(nodes, moving) {
+    const N = nodes.length, tex = new Int32Array(N), mov = [], len = new Float32Array(N), ph = new Float32Array(N);
+    for (let k = 0; k < N; k++) {
+      const nd = nodes[k], u = nd.up;
+      if (u < 0 || moving(nd)) { tex[k] = mov.length; mov.push(k); } else tex[k] = tex[u];
+      if (u >= 0) { const a = nodes[u].p, b = nd.p; len[k] = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]); }
+      ph[k] = hash2(k, 11);
+    }
+    return { tex, mov: Int32Array.from(mov), len, ph, slots: mov.length };
+  }
+  function windStep(nodes, plan, d, t, amp, o) {
+    o = Object.assign({ angle: 0.05, trunk: 0.3, freq: 0.9, dir: [1, 0, 0.35], maxLen: 2 }, o || {});
+    const dl = Math.hypot(o.dir[0], o.dir[2]) || 1, wx = o.dir[0] / dl, wz = o.dir[2] / dl;
+    const gust = 0.55 + 0.3 * Math.sin(t * 0.21) + 0.15 * Math.sin(t * 0.53 + 1.3);       // slow gusts: the whole tree leans and lets go
+    const { tex, mov, len, ph } = plan;
+    for (let j = 0; j < mov.length; j++) {
+      const k = mov[j], nd = nodes[k], s = 4 * tex[k];
+      if (nd.up < 0) { d[s] = d[s + 1] = d[s + 2] = 0; continue; }
+      const q = 4 * tex[nd.up], h = ph[k];
+      const s1 = Math.sin(t * o.freq * (0.75 + 0.5 * h) + 6.2832 * h), s2 = Math.sin(t * o.freq * 0.6 * (0.7 + 0.6 * h) + 17.0 * h);
+      const a = amp * o.angle * Math.min(len[k], o.maxLen) * (nd.lv === 0 ? o.trunk : 1 + 0.3 * Math.min(nd.lv, 4));   // long branches bend, they do not swing
+      const along = gust + 0.5 * s1, across = 0.45 * s2;                                // with the wind, and a little sideways
+      d[s] = d[q] + a * (wx * along - wz * across);
+      d[s + 1] = d[q + 1] - a * 0.12 * Math.abs(s1);
+      d[s + 2] = d[q + 2] + a * (wz * along + wx * across);
+    }
+    return d;
   }
 
   // ---- the critical line above Main: the first 30 non-trivial zeros of zeta (imaginary parts, all on Re s = 1/2)
@@ -442,6 +479,6 @@
   const fmt = (x) => String(Math.round(x)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const pct = (a, b) => (b ? (100 * a / b).toFixed(1) : '0.0') + '%';
 
-  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, pickSolids, buildTubes, buildFibers, buildSpine, ZETA_ZEROS, zeroHeights, zeroFlash, nucleusProgress, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
+  const api = { buildCSR, closureImports, tokenize, wrapTokens, declarations, wrapPi, hiScale, pickSolids, buildTubes, buildFibers, buildSpine, windPlan, windStep, ZETA_ZEROS, zeroHeights, zeroFlash, nucleusProgress, noteMidi, midiHz, makeThinner, bedParams, masterGain, smoothDamp, countRed, pickPoint, packetStats, hsv, nsColor, fmt, pct };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.RHLib = api;
 })(typeof self !== 'undefined' ? self : this);

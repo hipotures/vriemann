@@ -325,4 +325,21 @@ if (fs.existsSync(path.join(D, 'spine3.json'))) t('spine levels: same trunk on a
   const r3 = fs.readFileSync(path.join(D, 'spine3.bin')); assert(r3.every((x) => x === 1), 'full reaches every module');
   const b = L.buildSpine(s3.m.map((m, k) => ({ p: s3.p.slice(3 * k, 3 * k + 3), up: s3.up[k], lv: s3.lv[k] })), { segs: 2 }); assert(b.pos.every(Number.isFinite));
 });
+t('wind: root still, joints carry their parent, no wind = no motion, gentle on the real trees, full level moves only trunk + three branch levels', () => {
+  const nodes = [{ p: [0, 10, 0], up: -1, lv: 0 }, { p: [0, 5, 0], up: 0, lv: 0 }, { p: [3, 5, 0], up: 1, lv: 1 }, { p: [4, 4, 0], up: 2, lv: 2 }];
+  const plan = L.windPlan(nodes, () => true), d = new Float32Array(plan.slots * 4);
+  L.windStep(nodes, plan, d, 3.7, 1); assert.deepStrictEqual([...d.slice(0, 3)], [0, 0, 0], 'the root hangs still');
+  const m = (k) => Math.hypot(d[4 * plan.tex[k]], d[4 * plan.tex[k] + 1], d[4 * plan.tex[k] + 2]); assert(m(3) > m(2) && m(2) > m(1) && m(1) > 0, 'tips move most');
+  L.windStep(nodes, plan, d, 3.7, 0); assert(d.every((x) => x === 0), 'amp 0: still');
+  const pm = L.windPlan(nodes, (nd) => nd.lv <= 1); assert.strictEqual(pm.slots, 3); assert.strictEqual(pm.tex[3], pm.tex[2], 'a twig rides on its branch');
+  for (const f of ['spine.json', 'spine2.json', 'spine3.json']) {
+    if (!fs.existsSync(path.join(D, f))) continue;
+    const js = JSON.parse(fs.readFileSync(path.join(D, f)));
+    const nd = js.nodes || js.m.map((x, k) => ({ p: js.p.slice(3 * k, 3 * k + 3), up: js.up[k], lv: js.lv[k] }));
+    const pl = L.windPlan(nd, js.kind === 'module' ? (x) => x.lv <= 3 : () => true), dd = new Float32Array(pl.slots * 4); let mx = 0, tr = 0;
+    for (let tt = 0; tt < 60; tt += 1.3) { L.windStep(nd, pl, dd, tt, 1); for (let k = 0; k < nd.length; k++) { const q = 4 * pl.tex[k], v = Math.hypot(dd[q], dd[q + 1], dd[q + 2]); mx = Math.max(mx, v); if (nd[k].lv === 0) tr = Math.max(tr, v); } }
+    console.log(`     ${f}: ${pl.slots} joints, max sway ${mx.toFixed(2)} m (trunk ${tr.toFixed(2)} m)`);
+    assert(mx < 1.0 && tr < 0.6, 'gentle: ' + mx + ' / trunk ' + tr);
+  }
+});
 console.log(ok + ' tests passed');

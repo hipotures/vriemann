@@ -96,6 +96,9 @@ on the trunk lights that step with the lemmas branching off it. The info panel n
 modules: up to 10 levels, all the project-internal lemmas the sources name; the rest of the names point into Mathlib) and **Full** (every one of the
 175,187 modules, each hung under the module importing it that is closest above in import depth, its height = import depth along the trunk; the
 branches are modules, dimmer, so 175k of them do not add up to a white wall). L from any level goes on to the tower.
+**Wind** (the button next to the levels, or **V**): the tree hangs from `riemannHypothesis` like a willow, every node a joint that carries
+its parent's sway and adds a little of its own, so the tips move most (well under a metre); the module dots and labels ride along. It eases
+in slowly and calms while you point at or have selected something, so picking hits what you see. Remembered between sessions.
 It needs `python3 build_spine.py` once (reads the Lean sources of the volume, `--vol`; ~1 min), which writes `data/pos_spine*.f32`, `spine*.json` and `spine*.bin` for the three levels;
 without them L skips the spine. The dependency graph is approximate (a declaration's text up to the next one, identifiers resolved by short name
 to the same module, a direct import, or a transitively imported module). Tune the look with `SPINE` in `app.js`, the shape with the constants at the top of `build_spine.py`.

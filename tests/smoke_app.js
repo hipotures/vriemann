@@ -640,6 +640,24 @@ load('lib.js'); load('audio.js'); load('app.js');
     press('KeyL'); await waitMorph(); assert.strictEqual(S.layout, 'tower', 'L from the spine goes on to the tower'); frame(16, 2);
     if (keep >= 0) RH.select(keep);
   });
+  await t('wind (V / Wind button): blows only in a spine layout, eases in, moves tree, dots and labels together, calms while something is selected', async () => {
+    const waitMorph = async () => { await until(() => !S.layoutLoading, 60000); for (let k = 0; k < 400 && RH.layoutState().morph; k++) frame(16, 1); };
+    const press = (code) => winL.keydown.forEach((f) => f({ code })), keep = S.sel;
+    setView('tower'); await RH.setLayout('spine'); await waitMorph(); if (S.sel >= 0) { panels.info.dirty = true; frame(); panels.info.buttons.find((b) => b.label === 'Clear').fn(); }
+    S.hover = -1; S.wind = false; panels.menu.dirty = true; frame(); const btn = () => panels.menu.buttons.find((b) => b.label.startsWith('Wind'));
+    assert.strictEqual(btn().label, 'Wind: off'); press('KeyV'); assert(S.wind, 'V turns it on'); panels.menu.dirty = true; frame(); assert.strictEqual(btn().label, 'Wind: on');
+    const sp = RH.spine(), u = sp.mesh.material.uniforms; frame(16, 20); assert(S.windAmp > 0 && S.windAmp < 1, 'eases in: ' + S.windAmp);
+    frame(16, 200); assert(S.windAmp > 0.99, 'full strength after a few seconds'); assert.strictEqual(u.uWind.value, 1); assert.strictEqual(RH.halo().ptsMat.uniforms.uWind.value, 1, 'the dots ride along');
+    assert.strictEqual(RH.halo().ptsMat.uniforms.uWindTex.value, u.uWindTex.value, 'dots and tree read the same joints');
+    let mx = 0; for (let k = 0; k < sp.wd.length; k += 4) mx = Math.max(mx, Math.hypot(sp.wd[k], sp.wd[k + 1], sp.wd[k + 2])); assert(mx > 0.05 && mx < 1, 'gentle sway: ' + mx);
+    const an = RH.halo().pts.geometry.attributes.aNode.array, m0 = sp.list[0].m; assert(an[m0] >= 0, 'Main rides on the root joint');
+    const lab = sp.labels.children.find((l) => l.userData.node > 5), nd = sp.list[lab.userData.node]; assert(Math.abs(lab.position.x - (nd.p[0] + 0.12)) > 1e-4 || Math.abs(lab.position.z - nd.p[2]) > 1e-4, 'labels sway too');
+    RH.select(m0); frame(16, 40); assert.strictEqual(S.windAmp, 0, 'calm while something is selected (picking and the sphere use the still tree)'); assert.strictEqual(u.uWind.value, 0);
+    assert(Math.abs(lab.position.x - (nd.p[0] + 0.12)) < 1e-6, 'labels back in place');
+    panels.info.dirty = true; frame(); panels.info.buttons.find((b) => b.label === 'Clear').fn(); frame(16, 30); assert(S.windAmp > 0, 'blows again');
+    await RH.setLayout('tower'); await waitMorph(); frame(16, 30); assert.strictEqual(S.windAmp, 0, 'no wind outside the spine'); assert.strictEqual(RH.halo().ptsMat.uniforms.uWind.value, 0);
+    press('KeyV'); assert(!S.wind); if (keep >= 0) RH.select(keep);
+  });
   await t('module sphere fades out when the selection is cleared (not a pop) and stays out of the packets view', () => {
     const c = RH.core(); frame(16, 40); assert(c.fade > 0.99, 'should be fully shown first');
     panels.info.buttons.find((b) => b.label === 'Clear').fn(); assert.strictEqual(S.decls.length, 0); assert.strictEqual(c.target, 0);

@@ -9,7 +9,7 @@
 
   // ------------------------------------------------------------------ state
   const S = {
-    uiMode: 0, layout: 'tower', builtNow: new Set(), links: 'fibers', layoutTarget: 'tower', layouts: {}, layoutLoading: false, layoutError: '', morph: null, glow: 1, fov: 80, bringPrev: null, glowAuto: false, frameMs: 0, slowMs: 0, yawTarget: null, ys: { v: 0 }, decls: [], hoverSat: -1, hand: 'right', scale: 0.08, grab: null, uiHidden: false, followTarget: -1, fs: { v: 0 }, nodeDist: { right: null, left: null }, lastNodeDist: null,
+    uiMode: 0, wind: false, windAmp: 0, windT: 0, layout: 'tower', builtNow: new Set(), links: 'fibers', layoutTarget: 'tower', layouts: {}, layoutLoading: false, layoutError: '', morph: null, glow: 1, fov: 80, bringPrev: null, glowAuto: false, frameMs: 0, slowMs: 0, yawTarget: null, ys: { v: 0 }, decls: [], hoverSat: -1, hand: 'right', scale: 0.08, grab: null, uiHidden: false, followTarget: -1, fs: { v: 0 }, nodeDist: { right: null, left: null }, lastNodeDist: null,
     n: 0, meta: null, pos: null, depth: null, ns: null, pk: null, ids: null, names: null, nameIdx: null,
     csr: null, st: null, stF: null, hiF: null,
     view: 'tower', color: 0, hideOpen: false, closureOn: true, closureOnly: false, follow: false, followStill: false, mini: false,
@@ -69,7 +69,7 @@
     S.layoutTarget = name; S.layoutLoading = true; S.layoutError = ''; if (panels.menu) panels.menu.dirty = true;
     try {
       const to = await ensureLayout(name);
-      if (isSpine(name)) setSpineFlags(spines[name].reachedArr);                  // which dots are on this level's tree, which are dust
+      if (isSpine(name)) setSpineFlags(spines[name]);                  // which dots are on this level's tree, which are dust
       S.morph = { from: S.pos.slice(), to, t: 0, name };           // from the positions as drawn right now, so an interrupted morph does not jump
       hideLinks(); hoverMark.visible = false;
     } catch (e) { S.layoutError = String(e.message || e); S.layoutTarget = S.layout; }
@@ -89,14 +89,19 @@
   // (a module sits on its first node); on top of them one additive ribbon mesh draws the tree, with a flash running down it now and then.
   // gain: brightness of the branches per level (additive: 175k module branches at full strength would be a white wall); segs: samples per branch
   const SPINE = { halo: 3.0, minPx: 1.6, flashSec: 14, labelH: 0.025, labelEvery: 6, labelsLv1: 10, gain: { spine: 1, spine2: 0.7, spine3: 0.16 }, segs: { spine: 10, spine2: 8, spine3: 2 } };   // labelH: one text line on screen (~1.5% of the view height, like the I labels), constant while zooming
+  // the spine wind: one displacement per moving node in a float texture (uWindW x uWindH texels), looked up by slot
+  const WIND_AT = `vec3 windAt(float i){ vec2 uv = vec2(mod(i, uWindW) + .5, floor(i/uWindW) + .5)/vec2(uWindW, uWindH); return texture2D(uWindTex, uv).xyz; }`;
   const spines = {};                     // level name -> its tree, built on first use
   let spine = null;                       // the level shown (most) right now: picking, highlighting and the info panel use it
   const SPINE_V = `
-    attribute vec3 aTan; attribute float aSide, aT, aG, aW, aLv, aHot;
+    attribute vec3 aTan; attribute float aSide, aT, aG, aW, aLv, aHot, aN0, aN1, aF;
     uniform float uWorldScale, uMinPx, uHalo;
+    uniform sampler2D uWindTex; uniform float uWindW, uWindH, uWind;
     varying float vSide, vT, vG, vLv, vHot;
+    ${WIND_AT}
     void main(){
-      vec4 mv = modelViewMatrix*vec4(position, 1.);
+      vec3 pp = position; if (uWind > 0.) pp += uWind*mix(windAt(aN0), windAt(aN1), aF);   // the two joints it lies between drag it along
+      vec4 mv = modelViewMatrix*vec4(pp, 1.);
       vec3 tv = normalize(mat3(modelViewMatrix)*aTan);
       vec3 sv = cross(tv, normalize(mv.xyz)); float sl = length(sv); sv = sl > 1e-4 ? sv/sl : vec3(1., 0., 0.);   // across, facing the eye
       float w = max(aW*uHalo*uWorldScale, uMinPx*max(-mv.z, .05)/(projectionMatrix[1][1]*500.));
@@ -130,9 +135,17 @@
     g.setAttribute('position', new THREE.BufferAttribute(b.pos, 3)); g.setAttribute('aTan', new THREE.BufferAttribute(b.tan, 3));
     for (const [k, a] of [['aSide', b.side], ['aT', b.t], ['aG', b.g], ['aW', b.w], ['aLv', b.lv]]) g.setAttribute(k, new THREE.BufferAttribute(a, 1));
     g.setAttribute('aHot', new THREE.BufferAttribute(new Float32Array(b.vertexCount), 1).setUsage(THREE.DynamicDrawUsage));
+    // wind: which nodes are joints (all of them; on the full level only the trunk and three levels of branches, the rest rides along)
+    const plan = L.windPlan(js.nodes, js.kind === 'module' ? (nd) => nd.lv <= 3 : () => true), WW = 256, WH = Math.max(1, Math.ceil(plan.slots / WW));
+    const wd = new Float32Array(WW * WH * 4), wtex = new THREE.DataTexture(wd, WW, WH, THREE.RGBAFormat, THREE.FloatType); wtex.needsUpdate = true;
+    const a0 = new Float32Array(b.vertexCount), a1 = new Float32Array(b.vertexCount);
+    for (let v = 0; v < b.vertexCount; v++) { a0[v] = plan.tex[b.n0[v]]; a1[v] = plan.tex[b.n1[v]]; }
+    g.setAttribute('aN0', new THREE.BufferAttribute(a0, 1)); g.setAttribute('aN1', new THREE.BufferAttribute(a1, 1)); g.setAttribute('aF', new THREE.BufferAttribute(b.f, 1));
+    const dotNode = new Float32Array(S.n).fill(-1); for (let k = js.nodes.length - 1; k >= 0; k--) dotNode[js.nodes[k].m] = plan.tex[k];   // first node wins
     g.setIndex(new THREE.BufferAttribute(b.index, 1));
     const mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({ vertexShader: SPINE_V, fragmentShader: SPINE_F, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      uniforms: { uTime: { value: 0 }, uAlpha: { value: 0 }, uWorldScale: { value: 1 }, uMinPx: { value: SPINE.minPx }, uHalo: { value: SPINE.halo }, uFlashSec: { value: SPINE.flashSec }, uHotOn: { value: 0 }, uGain: { value: SPINE.gain[name] != null ? SPINE.gain[name] : 1 } } }));
+      uniforms: { uTime: { value: 0 }, uAlpha: { value: 0 }, uWorldScale: { value: 1 }, uMinPx: { value: SPINE.minPx }, uHalo: { value: SPINE.halo }, uFlashSec: { value: SPINE.flashSec }, uHotOn: { value: 0 }, uGain: { value: SPINE.gain[name] != null ? SPINE.gain[name] : 1 },
+        uWindTex: { value: wtex }, uWindW: { value: WW }, uWindH: { value: WH }, uWind: { value: 0 } } }));
     mesh.frustumCulled = false; mesh.renderOrder = 2; mesh.visible = false; world.add(mesh);
     // labels: the root, every few trunk steps, and a few first-level branches; sprites (they face the viewer, in VR too)
     const labels = new THREE.Group(); labels.visible = false; world.add(labels);
@@ -162,9 +175,37 @@
     const nC = b.vertexCount / 2, cpos = new Float32Array(nC * 3), cnode = new Int32Array(nC);
     for (let j = 0; j < nC; j++) { cpos.set(b.pos.subarray(6 * j, 6 * j + 3), 3 * j); cnode[j] = b.node[2 * j]; }
     return (spines[name] = { name, kind: js.kind || 'decl', mesh, labels, steps: T, nodes: js.nodes.length, reached: r.reduce((a, x) => a + x, 0), reachedArr: r,
-      root: js.root, list: js.nodes, cpos, cnode, vnode: b.node, step: b.step, sel: -1 });
+      root: js.root, list: js.nodes, cpos, cnode, vnode: b.node, step: b.step, sel: -1, plan, wd, wtex, WW, WH, dotNode });
   }
-  function setSpineFlags(r) { const sa = pts.geometry.attributes.aSpine; for (let i = 0; i < r.length; i++) sa.array[i] = r[i]; sa.needsUpdate = true; }
+  function setSpineFlags(sp) {
+    const ga = pts.geometry.attributes, sa = ga.aSpine; for (let i = 0; i < S.n; i++) sa.array[i] = sp.reachedArr[i]; sa.needsUpdate = true;
+    ga.aNode.array.set(sp.dotNode); ga.aNode.needsUpdate = true;                     // the dots ride on this level's joints
+    const u = ptsMat.uniforms; u.uWindTex.value = sp.wtex; u.uWindW.value = sp.WW; u.uWindH.value = sp.WH;
+  }
+  function windDummy() { const t = new THREE.DataTexture(new Float32Array(4), 1, 1, THREE.RGBAFormat, THREE.FloatType); t.needsUpdate = true; return t; }
+  // ---- wind: Wind (menu) / V toggles it; it blows only in a spine layout, eases in slowly and calms quickly while you point at or
+  //      have selected something (picking, the selection sphere and its links use the still positions)
+  const WIND = { angle: 0.05, trunk: 0.3, freq: 0.9, dir: [1, 0, 0.35], maxLen: 2, up: 0.4, down: 2.5 };
+  const loadWind = () => { try { return localStorage.getItem('rh.wind') === '1'; } catch (e) { return false; } };
+  function toggleWind() { S.wind = !S.wind; try { localStorage.setItem('rh.wind', S.wind ? '1' : '0'); } catch (e) { /* private window */ } if (panels.menu) panels.menu.dirty = true; }
+  function windTick(dt) {
+    S.windT += dt;
+    const sp = isSpine(S.layout) && !S.morph ? spines[S.layout] : null;
+    const target = S.wind && sp && S.view === 'tower' && S.sel < 0 && S.hover < 0 ? 1 : 0;
+    S.windAmp = target > S.windAmp ? Math.min(target, S.windAmp + dt * WIND.up) : Math.max(target, S.windAmp - dt * WIND.down);
+    const on = sp && S.windAmp > 1e-4;
+    for (const x of SPINES) if (spines[x]) spines[x].mesh.material.uniforms.uWind.value = on && spines[x] === sp ? 1 : 0;
+    ptsMat.uniforms.uWind.value = on ? 1 : 0;
+    if (!sp) return;
+    if (on) { L.windStep(sp.list, sp.plan, sp.wd, S.windT, S.windAmp, WIND); sp.wtex.needsUpdate = true; }
+    if (on || sp.labelsMoved) {                                                     // the labels ride along too (and go back when it calms)
+      for (const l of sp.labels.children) {
+        const k = l.userData.node; if (k == null) continue; const nd = sp.list[k], q = 4 * sp.plan.tex[k], f = on ? 1 : 0;
+        l.position.set(nd.p[0] + 0.12 + f * sp.wd[q], nd.p[1] + f * sp.wd[q + 1], nd.p[2] + f * sp.wd[q + 2]);
+      }
+      sp.labelsMoved = on;
+    }
+  }
   /** how much of one spine level is shown: 1 in that layout, 0 elsewhere, cross-fading with the morph; only in the tower view */
   function amountOf(name) {
     const m = S.morph; let a = S.layout === name ? 1 : 0;
@@ -272,11 +313,14 @@
   const VERT = `
     uniform float uSize, uTime, uMode, uHideOpen, uHiOn, uScale, uHiA, uHiS, uHiOnly, uSpine, uSpineBare;
     attribute float aState, aNs, aDepth, aHi, aSolid, aSpine;
+    attribute float aNode; uniform sampler2D uWindTex; uniform float uWindW, uWindH, uWind;
     varying vec3 vCol; varying float vA;
     vec3 hsv2rgb(vec3 c){ vec4 K=vec4(1.,2./3.,1./3.,3.); vec3 p=abs(fract(c.xxx+K.xyz)*6.-K.www); return c.z*mix(K.xxx,clamp(p-K.xxx,0.,1.),c.y); }
+    ${WIND_AT}
     void main(){
       if (aSolid > .5) { gl_Position = vec4(2.,2.,2.,1.); gl_PointSize = 0.; vCol = vec3(0.); vA = 0.; return; }   // drawn as a real 3D bubble (SOLID) instead
-      vec4 mv = modelViewMatrix*vec4(position,1.);
+      vec3 pp = position; if (uWind > 0. && aNode >= 0.) pp += uWind*windAt(aNode);   // spine wind: a dot rides on its node
+      vec4 mv = modelViewMatrix*vec4(pp,1.);
       float st = aState, size = uSize*uScale, a = 1.; vec3 col;
       if (uMode < .5) {
         if (st < .5)      { col = vec3(.42,.47,.58); a = .65; }
@@ -485,8 +529,9 @@
     p.button(c, 320, y + 12, 260, 64, 'Packets', () => setView('packets'), S.view === 'packets');
     p.button(c, 600, y + 12, 260, 64, S.layoutLoading ? 'Layout: loading…' : S.layoutError ? 'Layout: failed' : 'Layout: ' + LAYOUT_LABEL[S.layoutTarget], cycleLayout, S.layoutTarget !== 'tower');
     y += 110;
-    text(c, 'SPINE (P)', 40, y, { size: 20, color: '#7283a6', weight: 700 });
-    SPINES.forEach((x, i) => p.button(c, 40 + i * 280, y + 12, 260, 64, SPINE_LABEL[x], () => setLayout(x), S.layoutTarget === x));
+    text(c, 'SPINE (P · wind V)', 40, y, { size: 20, color: '#7283a6', weight: 700 });
+    SPINES.forEach((x, i) => p.button(c, 40 + i * 210, y + 12, 190, 64, SPINE_LABEL[x], () => setLayout(x), S.layoutTarget === x));
+    p.button(c, 670, y + 12, 190, 64, S.wind ? 'Wind: on' : 'Wind: off', toggleWind, S.wind);
     y += 110;
     text(c, 'COLOR', 40, y, { size: 20, color: '#7283a6', weight: 700 });
     ['State', 'Namespace', 'Depth'].forEach((l, i) => p.button(c, 40 + i * 280, y + 12, 260, 64, l, () => setColor(i), S.color === i));
@@ -1251,11 +1296,12 @@
     g.setAttribute('aNs', new THREE.BufferAttribute(nsF, 1));
     g.setAttribute('aDepth', new THREE.BufferAttribute(dF, 1));
     g.setAttribute('aHi', new THREE.BufferAttribute(S.hiF, 1).setUsage(THREE.DynamicDrawUsage));
-    g.setAttribute('aSpine', new THREE.BufferAttribute(new Float32Array(n), 1));   // 1 = reached by the spine tree (filled when that layout is first loaded)
+    g.setAttribute('aSpine', new THREE.BufferAttribute(new Float32Array(n), 1));
+    g.setAttribute('aNode', new THREE.BufferAttribute(new Float32Array(n).fill(-1), 1));   // the spine node (wind slot) each dot sits on, -1 = dust   // 1 = reached by the spine tree (filled when that layout is first loaded)
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, maxD * yStep / 2, 0), 60);
     ptsMat = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false,
-      uniforms: { uSize: { value: 0.03 }, uTime: { value: 0 }, uMode: { value: 0 }, uHideOpen: { value: 0 }, uHiOn: { value: 0 }, uScale: { value: 1 }, uHiA: { value: 1 }, uHiS: { value: 1 }, uHiOnly: { value: 0 }, uSpine: { value: 0 }, uSpineBare: { value: 0 } },
+      uniforms: { uSize: { value: 0.03 }, uTime: { value: 0 }, uMode: { value: 0 }, uHideOpen: { value: 0 }, uHiOn: { value: 0 }, uScale: { value: 1 }, uHiA: { value: 1 }, uHiS: { value: 1 }, uHiOnly: { value: 0 }, uSpine: { value: 0 }, uSpineBare: { value: 0 }, uWindTex: { value: windDummy() }, uWindW: { value: 1 }, uWindH: { value: 1 }, uWind: { value: 0 } },
     });
     pts = new THREE.Points(g, ptsMat); pts.frustumCulled = false; world.add(pts);
     // halo: the SAME geometry (no extra buffers) and the SAME uniform objects, drawn bigger/softer/additive on top
@@ -1322,6 +1368,7 @@
       uniforms: { uTime: { value: 0 }, uWidth: { value: FIB.width }, uMinPx: { value: FIB.minPx }, uWorldScale: { value: 1 }, uSpeed: { value: FIB.speed }, uFreq: { value: FIB.freq }, uConSpeed: { value: FIB.conSpeed } } }));
     fibers.frustumCulled = false; fibers.renderOrder = 2; world.add(fibers);
     { const v = loadLinks(); if (v) S.links = v; }
+    S.wind = loadWind();
 
     // depth rulers (re-oriented in updateRulers() depending on which side of the ring the viewer is)
     for (let d = 0; d <= maxD; d += 25) for (let a = 0; a < 4; a++) {
@@ -1856,6 +1903,7 @@
       if (e.code === 'KeyH' || e.code === 'KeyY') toggleUI();         // hide / show all UI    (VR: Y)
       if (e.code === 'KeyL') cycleLayout();                           // tower -> helix x2 -> x4 -> x8 -> spine
       if (e.code === 'KeyP') cycleSpineLevel();                       // spine: skeleton -> dense -> full
+      if (e.code === 'KeyV') toggleWind();                            // spine: wind off / on
       if (e.code === 'KeyC') cycleClosure();                          // closure off / dim / only
       if (e.code === 'KeyK') cycleLinks();                            // connection style: fibres / tubes
       if (e.code === 'KeyG') cycleGlow();                             // glow off / on / all
@@ -1919,7 +1967,7 @@
     }
     ribbons.material.uniforms.uTime.value = t / 1000; ribbons.material.uniforms.uWorldScale.value = world.scale.x;
     fibers.material.uniforms.uTime.value = t / 1000; fibers.material.uniforms.uWorldScale.value = world.scale.x; for (const c of cores) c.shellMat.uniforms.uDockT.value = t / 1000;
-    morphTick(dt); spineTick(t); grabTick(); coreTick(t, dt); beaconTick(t, dt); debugTick();
+    morphTick(dt); spineTick(t); windTick(dt); grabTick(); coreTick(t, dt); beaconTick(t, dt); debugTick();
     // adaptive quality: in VR, if frames stay slow (< ~42 fps) for 3 s, take the glow down one level (the saved choice is untouched; G raises it again)
     if (dtMs > 0 && dtMs < 500) {
       S.frameMs = S.frameMs ? S.frameMs * 0.9 + dtMs * 0.1 : dtMs;
@@ -1938,7 +1986,7 @@
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
     const el = $('loading'); if (el) el.remove();
-    window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, cycleSpineLevel, spine: () => spine, spines: () => spines, spineAmount, SPINE, pickInWorld, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, cycleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
+    window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, cycleSpineLevel, toggleWind, WIND, spine: () => spine, spines: () => spines, spineAmount, SPINE, pickInWorld, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, cycleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }
   boot();
 })();
