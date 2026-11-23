@@ -285,7 +285,8 @@
   //      trunk nodes first and in order.  Every curve becomes a camera-facing ribbon (2 vertices per sample, like the fibres):
   //      the trunk is one Catmull-Rom curve through its nodes with a fine zigzag (the "lightning"), each branch a bowed quadratic arc
   //      from its parent.  Per vertex: aT = 0..1 along its own curve, aG = 0..1 down the whole tree (for the flash running down),
-  //      aW = half-width in world units (branches taper to their tips), aLv = level.
+  //      aW = half-width in world units (branches taper to their tips), aLv = level; node[v] = the node a vertex belongs to (a branch
+  //      = the node at its end, the trunk = its nearest step), step[k] = the trunk step node k hangs from (both for picking / highlighting).
   const hash2 = (a, b) => { const x = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return x - Math.floor(x); };
   function buildSpine(nodes, o) {
     o = Object.assign({ w: [0.06, 0.028, 0.016, 0.010, 0.007], sub: 10, segs: 10, jitter: 0.035, bow: 0.22 }, o || {});
@@ -305,7 +306,7 @@
         }
       }
       pts.push(P(T - 1).slice());
-      curves.push({ pts, g0: 0, g1: 1, w: o.w[0], lv: 0 });
+      curves.push({ pts, g0: 0, g1: 1, w: o.w[0], lv: 0, node: -1 });
     }
     for (let k = 0; k < nodes.length; k++) {
       const nd = nodes[k]; if (nd.lv === 0 || nd.up < 0) continue;
@@ -318,11 +319,11 @@
       const pts = [];
       for (let s = 0; s <= o.segs; s++) { const q = s / o.segs, w0 = (1 - q) * (1 - q), w1 = 2 * (1 - q) * q, w2 = q * q; pts.push([0, 1, 2].map((c) => w0 * a[c] + w1 * m[c] + w2 * b[c])); }
       const g = T > 1 ? step[k] / (T - 1) : 0;
-      curves.push({ pts, g0: g, g1: Math.min(1, g + 0.02 * nd.lv), w: o.w[Math.min(nd.lv, o.w.length - 1)], lv: nd.lv });
+      curves.push({ pts, g0: g, g1: Math.min(1, g + 0.02 * nd.lv), w: o.w[Math.min(nd.lv, o.w.length - 1)], lv: nd.lv, node: k });
     }
     let V = 0, I = 0; for (const c of curves) { V += c.pts.length * 2; I += (c.pts.length - 1) * 6; }
     const pos = new Float32Array(V * 3), tan = new Float32Array(V * 3), side = new Float32Array(V), t = new Float32Array(V),
-      g = new Float32Array(V), w = new Float32Array(V), lv = new Float32Array(V), index = new Uint32Array(I);
+      g = new Float32Array(V), w = new Float32Array(V), lv = new Float32Array(V), index = new Uint32Array(I), node = new Int32Array(V);
     let v = 0, ii = 0;
     for (const c of curves) {
       const n = c.pts.length, base = v;
@@ -333,11 +334,12 @@
         for (let sd = 0; sd < 2; sd++, v++) {
           pos.set(c.pts[s], 3 * v); tan[3 * v] = tx; tan[3 * v + 1] = ty; tan[3 * v + 2] = tz;
           side[v] = sd ? 1 : -1; t[v] = q; g[v] = c.g0 + (c.g1 - c.g0) * q; w[v] = width; lv[v] = c.lv;
+          node[v] = c.node >= 0 ? c.node : trunk[Math.min(T - 1, Math.round(s / o.sub))];   // which node this piece belongs to (trunk: the nearest step)
         }
       }
       for (let s = 0; s < n - 1; s++) { const v0 = base + 2 * s; index.set([v0, v0 + 1, v0 + 2, v0 + 1, v0 + 3, v0 + 2], ii); ii += 6; }
     }
-    return { pos, tan, side, t, g, w, lv, index, curves: curves.length, trunkSteps: T, vertexCount: V, indexCount: I };
+    return { pos, tan, side, t, g, w, lv, node, step, index, curves: curves.length, trunkSteps: T, vertexCount: V, indexCount: I };
   }
 
   // ---- the critical line above Main: the first 30 non-trivial zeros of zeta (imaginary parts, all on Re s = 1/2)

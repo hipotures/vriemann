@@ -579,12 +579,18 @@ load('lib.js'); load('audio.js'); load('app.js');
     panels.info.dirty = true; frame(); panels.info.buttons.find((b) => b.label === 'Clear').fn(); frame(16, 80);   // no old selection (its sphere's satellites would catch the ray)
     const kn = sp.list.findIndex((nd) => nd.lv === 1), nd = sp.list[kn], world = ents.world.object3D; world.updateMatrixWorld(true);
     S.focus = nd.p[1]; frame(16, 2); world.updateMatrixWorld(true); ents.panels.object3D.position.set(0, 0, 50); ents.panels.object3D.updateMatrixWorld(true);
-    const tgt = new THREE.Vector3(...nd.p).applyMatrix4(world.matrixWorld), o = new THREE.Vector3(0, 1.6, 0), d = tgt.clone().sub(o).normalize();
+    const js = []; sp.cnode.forEach((x, j) => { if (x === kn) js.push(j); }); const jm = js[Math.floor(js.length / 2)];       // the middle of the branch's arc, not its end
+    const tgt = new THREE.Vector3(sp.cpos[3 * jm], sp.cpos[3 * jm + 1], sp.cpos[3 * jm + 2]).applyMatrix4(world.matrixWorld), o = new THREE.Vector3(0, 1.6, 0), d = tgt.clone().sub(o).normalize();
     ents.rc.object3D.position.copy(o); ents.rc.object3D.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), d); ents.rc.object3D.updateMatrixWorld(true);
     const comps = ents.rc.components; delete ents.rc.components;   // an earlier test gave the laser a tilted beam; aim along -Z here
     ents.rc.listeners.triggerdown[0](); ents.rc.components = comps; assert.strictEqual(S.sel, nd.m, 'the node\'s module is selected: ' + S.names[S.sel] + ' for ' + nd.n);
     await until(() => !S.src.loading && S.src.tok); frame(16, 2); assert(S.src.hl, 'the declaration ' + nd.n + ' is highlighted in the source');
     assert(S.decls.some((x) => x.line === S.src.hl.from && x.name.endsWith(nd.n)), 'highlight is on ' + nd.n);
+    assert.strictEqual(sp.sel, kn, 'the branch itself is selected'); assert.strictEqual(sp.mesh.material.uniforms.uHotOn.value, 1);
+    const hot = sp.mesh.geometry.attributes.aHot.array; let nh = 0; for (const x of hot) nh += x; assert(nh > 0 && nh < hot.length / 4, 'only that branch (and its twigs) lit: ' + nh + '/' + hot.length);
+    for (let v = 0; v < hot.length; v++) if (sp.vnode[v] === kn) assert.strictEqual(hot[v], 1, 'the clicked branch is lit');
+    panels.info.dirty = true; frame(); assert(drawn.some((x) => x.includes('branch ' + nd.n)), 'the info panel names the branch');
+    panels.info.buttons.find((b) => b.label === 'Clear').fn(); assert.strictEqual(sp.mesh.material.uniforms.uHotOn.value, 0, 'Clear also clears the branch'); RH.select(nd.m); frame(16, 2);   // the next test expects a selection
     ents.panels.object3D.position.set(0, 0, 0); ents.panels.object3D.updateMatrixWorld(true);
     setView('packets'); frame(16, 2); assert(!sp.mesh.visible, 'no tree in the packets view'); setView('tower');
     await RH.setLayout('tower'); await waitMorph(); frame(16, 2); assert(!sp.mesh.visible && !sp.labels.visible, 'gone again in the tower'); assert(RH.rulers.some((m) => m.visible), 'rulers back');

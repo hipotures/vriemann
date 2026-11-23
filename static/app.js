@@ -83,23 +83,23 @@
   const SPINE = { halo: 3.0, minPx: 1.6, flashSec: 14, labelH: 0.025, labelEvery: 6, labelsLv1: 10 };   // labelH: one text line on screen (~1.5% of the view height, like the I labels), constant while zooming
   let spine = null;
   const SPINE_V = `
-    attribute vec3 aTan; attribute float aSide, aT, aG, aW, aLv;
+    attribute vec3 aTan; attribute float aSide, aT, aG, aW, aLv, aHot;
     uniform float uWorldScale, uMinPx, uHalo;
-    varying float vSide, vT, vG, vLv;
+    varying float vSide, vT, vG, vLv, vHot;
     void main(){
       vec4 mv = modelViewMatrix*vec4(position, 1.);
       vec3 tv = normalize(mat3(modelViewMatrix)*aTan);
       vec3 sv = cross(tv, normalize(mv.xyz)); float sl = length(sv); sv = sl > 1e-4 ? sv/sl : vec3(1., 0., 0.);   // across, facing the eye
       float w = max(aW*uHalo*uWorldScale, uMinPx*max(-mv.z, .05)/(projectionMatrix[1][1]*500.));
       mv.xyz += sv*aSide*w;
-      vSide = aSide; vT = aT; vG = aG; vLv = aLv;
+      vSide = aSide; vT = aT; vG = aG; vLv = aLv; vHot = aHot;
       gl_Position = projectionMatrix*mv;
     }`;
   // a wide violet haze, a pink body and a thin white-hot core (the trunk's core is the brightest), all additive: where branches cross
   // they add up to white, like the poster.  A flash runs down the whole tree every SPINE.flashSec seconds; the trunk flickers a little.
   const SPINE_F = `
-    uniform float uTime, uAlpha, uFlashSec;
-    varying float vSide, vT, vG, vLv;
+    uniform float uTime, uAlpha, uFlashSec, uHotOn;
+    varying float vSide, vT, vG, vLv, vHot;
     void main(){
       float s2 = vSide*vSide, trunk = 1. - step(.5, vLv);
       float core = exp(-s2*45.), body = exp(-s2*9.), haze = exp(-s2*2.2);
@@ -109,6 +109,7 @@
       float ends = smoothstep(0., .04, vT) + trunk;                                // branches grow out of the trunk, no blob at the joint
       vec3 col = vec3(.50, .26, .92)*haze*.30 + vec3(1., .36, 1.)*body*(.45 + .25*trunk) + vec3(1., .92, 1.)*core*(.30 + .95*trunk);
       col *= tip*flick*(1. + 1.6*flash)*min(ends, 1.);
+      if (uHotOn > .5) col *= vHot > .5 ? 1.9 : .16;                              // a selected branch (and what hangs from it) stands out
       gl_FragColor = vec4(col, uAlpha);
     }`;
   function buildSpine(js, r) {
@@ -116,9 +117,10 @@
     const b = L.buildSpine(js.nodes), g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(b.pos, 3)); g.setAttribute('aTan', new THREE.BufferAttribute(b.tan, 3));
     for (const [k, a] of [['aSide', b.side], ['aT', b.t], ['aG', b.g], ['aW', b.w], ['aLv', b.lv]]) g.setAttribute(k, new THREE.BufferAttribute(a, 1));
+    g.setAttribute('aHot', new THREE.BufferAttribute(new Float32Array(b.vertexCount), 1).setUsage(THREE.DynamicDrawUsage));
     g.setIndex(new THREE.BufferAttribute(b.index, 1));
     const mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({ vertexShader: SPINE_V, fragmentShader: SPINE_F, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      uniforms: { uTime: { value: 0 }, uAlpha: { value: 0 }, uWorldScale: { value: 1 }, uMinPx: { value: SPINE.minPx }, uHalo: { value: SPINE.halo }, uFlashSec: { value: SPINE.flashSec } } }));
+      uniforms: { uTime: { value: 0 }, uAlpha: { value: 0 }, uWorldScale: { value: 1 }, uMinPx: { value: SPINE.minPx }, uHalo: { value: SPINE.halo }, uFlashSec: { value: SPINE.flashSec }, uHotOn: { value: 0 } } }));
     mesh.frustumCulled = false; mesh.renderOrder = 2; mesh.visible = false; world.add(mesh);
     // labels: the root, every few trunk steps, and a few first-level branches; sprites (they face the viewer, in VR too)
     const labels = new THREE.Group(); labels.visible = false; world.add(labels);
@@ -145,8 +147,10 @@
       leg.position.set(top[0] + 0.12, top[1] + 1.2, top[2]); leg.userData.legend = true; labels.add(leg);
     }
     const sa = pts.geometry.attributes.aSpine; for (let i = 0; i < r.length; i++) sa.array[i] = r[i]; sa.needsUpdate = true;
-    const nodePos = new Float32Array(js.nodes.length * 3); js.nodes.forEach((nd, k) => nodePos.set(nd.p, 3 * k));
-    spine = { mesh, labels, steps: T, nodes: js.nodes.length, reached: r.reduce((a, x) => a + x, 0), root: js.root, list: js.nodes, nodePos };
+    // picking: the centre line of every curve (one of each vertex pair), each sample knowing its node, so a click anywhere on a branch counts
+    const nC = b.vertexCount / 2, cpos = new Float32Array(nC * 3), cnode = new Int32Array(nC);
+    for (let j = 0; j < nC; j++) { cpos.set(b.pos.subarray(6 * j, 6 * j + 3), 3 * j); cnode[j] = b.node[2 * j]; }
+    spine = { mesh, labels, steps: T, nodes: js.nodes.length, reached: r.reduce((a, x) => a + x, 0), root: js.root, list: js.nodes, cpos, cnode, vnode: b.node, step: b.step, sel: -1 };
     return spine;
   }
   /** how much of the spine is shown: 1 in the spine layout, 0 elsewhere, cross-fading with the morph; only in the tower view */
@@ -154,6 +158,20 @@
     const m = S.morph; let a = S.layout === 'spine' ? 1 : 0;
     if (m) { const e = m.t * m.t * (3 - 2 * m.t); a = m.name === 'spine' ? Math.max(a * (1 - e), e) : a * (1 - e); }
     return S.view === 'tower' ? a : 0;
+  }
+  /** highlight spine node k: a branch with everything hanging from it, or a trunk step with its own branches; -1 clears */
+  function spineSelect(k) {
+    if (!spine || (k === spine.sel && k >= 0)) return;
+    spine.sel = k == null ? -1 : k; const L0 = spine.list, hot = new Uint8Array(L0.length);
+    if (spine.sel >= 0) {
+      const root = spine.sel, trunkStep = L0[root].lv === 0;
+      for (let n = 0; n < L0.length; n++) {
+        if (trunkStep) { hot[n] = n === root || (L0[n].lv > 0 && spine.step[n] === root) ? 1 : 0; continue; }
+        let a = n; while (a >= 0 && a !== root && L0[a].lv > 0) a = L0[a].up; hot[n] = a === root ? 1 : 0;   // parents come first: a short walk up
+      }
+    }
+    const at = spine.mesh.geometry.attributes.aHot; for (let v = 0; v < at.count; v++) at.array[v] = hot[spine.vnode[v]]; at.needsUpdate = true;
+    spine.mesh.material.uniforms.uHotOn.value = spine.sel >= 0 ? 1 : 0; if (panels.info) panels.info.dirty = true;
   }
   function spineTick(t) {
     const a = spineAmount();
@@ -614,6 +632,11 @@
       ly += 42;
       const ni = S.csr.impStart[i + 1] - S.csr.impStart[i], nc = S.csr.conStart[i + 1] - S.csr.conStart[i];
       text(c, `imports ${ni} · imported by ${nc} · whole ancestry ${L.fmt(S.ancestors)} modules`, 40, ly, { size: 24 });
+      const ss = spine && spine.sel >= 0 && spine.list[spine.sel];
+      if (ss && ss.m === i) {
+        const nb = ss.lv ? 0 : spine.list.filter((x, n) => x.lv > 0 && spine.step[n] === spine.sel).length;
+        text(c, fitLeft(c, ss.lv ? `◆ branch ${ss.n} (level ${ss.lv}, from trunk step ${spine.step[spine.sel] + 1})` : `◆ trunk step ${spine.sel + 1}/${spine.steps}: ${ss.n} · ${nb} lemmas branch off here`, 820), 40, ly + 40, { size: 24, color: '#e0a8ff' });
+      }
       p.button(c, 40, 340, 270, 64, '◀ an import', () => stepNeighbor(-1), false);
       p.button(c, 330, 340, 270, 64, 'a consumer ▶', () => stepNeighbor(1), false);
       p.button(c, 620, 340, 240, 64, 'Clear', () => clearSel(), false);
@@ -1458,12 +1481,13 @@
   }
   function firstOfPacket(k) { for (let i = 0; i < S.n; i++) if (S.pk[i] === k) return i; return -1; }
   function clearSel() {
-    S.sel = -1; S.selPk = -1; S.hiF.fill(0); pts.geometry.attributes.aHi.needsUpdate = true;
+    S.sel = -1; S.selPk = -1; S.hiF.fill(0); pts.geometry.attributes.aHi.needsUpdate = true; spineSelect(-1);
     selMark.visible = false; coreHide(); hideLinks(); applyUniforms(); rebuildSolids();
     S.src.tok = null; S.src.hl = null; S.decls = []; S.hoverSat = -1; S.src.name = ''; S.src.error = ''; S.src.loading = false;
     panels.info.dirty = panels.source.dirty = true; syncSourcePanel();
   }
   function select(i, keepSrc) {
+    if (spine && spine.sel >= 0 && spine.list[spine.sel].m !== i) spineSelect(-1);   // the branch highlight belongs to its own module
     S.sel = i; S.selPk = -1; S.hiF.fill(0); S.impCur = 0; S.conCur = 0;
     const c = S.csr;
     if (S.closureOn) {
@@ -1573,8 +1597,8 @@
     tmpM.copy(world.matrixWorld).invert();
     const lo = o.clone().applyMatrix4(tmpM), ld = d.clone().transformDirection(tmpM);
     if (S.view === 'tower' && spine && spineAmount() > 0.5) {             // spine: the tree's nodes (declarations) first, then the dust
-      const k = L.pickPoint(spine.nodePos, spine.nodes, lo, ld, null, false, 0.025);
-      if (k >= 0) return { node: spine.list[k].m, pk: -1, sk: k };
+      const j = L.pickPoint(spine.cpos, spine.cnode.length, lo, ld, null, false, 0.02);
+      if (j >= 0) { const k = spine.cnode[j]; return { node: spine.list[k].m, pk: -1, sk: k }; }
     }
     if (S.view === 'tower') return { node: L.pickPoint(S.pos, S.n, lo, ld, S.st, S.hideOpen, 0.02), pk: -1, sk: -1 };
     return { node: -1, pk: L.pickPoint(S.pkPos, S.meta.packets, lo, ld, null, false, 0.05) };
@@ -1615,7 +1639,7 @@
       hoverMark.visible = r.node >= 0 && !S.uiHidden;
       if (r.sk >= 0) { const q = spine.list[r.sk].p; hoverMark.position.set(q[0], q[1], q[2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
       else if (r.node >= 0) { hoverMark.position.set(S.pos[3 * r.node], S.pos[3 * r.node + 1], S.pos[3 * r.node + 2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
-      if (click && r.node >= 0) { stopFollow(); S.pendingDecl = r.sk >= 0 ? spine.list[r.sk].n : null; if (r.node !== S.sel) select(r.node); else gotoPendingDecl(); }
+      if (click && r.node >= 0) { stopFollow(); S.pendingDecl = r.sk >= 0 ? spine.list[r.sk].n : null; if (r.node !== S.sel) select(r.node); else gotoPendingDecl(); spineSelect(r.sk); }
       return r.node >= 0 ? 'node' : 'none';
     } else {
       if (r.pk !== S.hoverPk) { S.hoverPk = r.pk; panels.info.dirty = true; }
