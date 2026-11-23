@@ -10,7 +10,7 @@ prepared Lean volume (source code) and our own build logs/receipts.  No GitHub c
 import math, argparse, gzip, json, os, re, ssl, sys, threading, time, queue, collections
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote   # quote: header values must be latin-1, module names like Foo₂ are not
 from email.utils import formatdate, parsedate_to_datetime
 
 ROOT = Path(__file__).resolve().parent
@@ -480,7 +480,7 @@ class H(BaseHTTPRequestHandler):
         if len(data) > 300_000:
             data, note = data[:300_000], b"\n-- [truncated by viewer at 300 kB]\n"
         return self.send_bytes(200, data + note, "text/plain; charset=utf-8",
-                               {"X-Module": name, "X-Source-Size": str(p.stat().st_size)})
+                               {"X-Module": quote(name), "X-Source-Size": str(p.stat().st_size)})
 
     def api_events(self):
         qu = queue.Queue(maxsize=1000)
