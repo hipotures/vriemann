@@ -315,4 +315,14 @@ if (fs.existsSync(path.join(D, 'spine.json'))) t('spine data: trunk from riemann
   const main = names.indexOf('Main'); assert.deepStrictEqual([...sp.slice(3 * main, 3 * main + 3)].map((x) => +x.toFixed(2)), js.nodes[0].p.map((x) => +x.toFixed(2)));
   const b = L.buildSpine(js.nodes); assert(b.pos.every(Number.isFinite)); assert.strictEqual(b.trunkSteps, js.steps);
 });
+if (fs.existsSync(path.join(D, 'spine3.json'))) t('spine levels: same trunk on all three, dense > skeleton, full = every module exactly once, parents first', () => {
+  const J = (f) => JSON.parse(fs.readFileSync(path.join(D, f))), s1 = J('spine.json'), s2 = J('spine2.json'), s3 = J('spine3.json');
+  const trunk = (js) => (js.nodes ? js.nodes.filter((x) => x.lv === 0).map((x) => x.n) : js.lv.map((l, k) => (l === 0 ? js.n[k] : null)).filter((x) => x));
+  assert.deepStrictEqual(trunk(s2), trunk(s1)); assert.deepStrictEqual(trunk(s3), trunk(s1));
+  assert(s2.nodes.length > s1.nodes.length);
+  const N = s3.m.length; assert.strictEqual(s3.up.length, N); assert.strictEqual(s3.lv.length, N); assert.strictEqual(s3.p.length, 3 * N);
+  const seen = new Uint8Array(n); s3.m.forEach((m, k) => { if (s3.lv[k] > 0) { assert(!seen[m], 'module twice: ' + names[m]); seen[m] = 1; } assert(s3.up[k] < k); });
+  const r3 = fs.readFileSync(path.join(D, 'spine3.bin')); assert(r3.every((x) => x === 1), 'full reaches every module');
+  const b = L.buildSpine(s3.m.map((m, k) => ({ p: s3.p.slice(3 * k, 3 * k + 3), up: s3.up[k], lv: s3.lv[k] })), { segs: 2 }); assert(b.pos.every(Number.isFinite));
+});
 console.log(ok + ' tests passed');

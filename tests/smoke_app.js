@@ -614,6 +614,32 @@ load('lib.js'); load('audio.js'); load('app.js');
     await RH.setLayout('helix8'); await waitMorph(); RH.cycleLayout(); await until(() => S.layoutTarget === 'tower'); await waitMorph(); assert.strictEqual(S.layout, 'tower', 'spine skipped');
     global.fetch = real; S.spineMissing = keep; S.layoutError = ''; frame(16, 2);
   });
+  await t('spine levels: skeleton -> dense -> full (P / the SPINE row), each its own tree; full reaches every module, its branches are modules', async () => {
+    const waitMorph = async () => { await until(() => !S.layoutLoading, 60000); for (let k = 0; k < 400 && RH.layoutState().morph; k++) frame(16, 1); };
+    const press = (code) => winL.keydown.forEach((f) => f({ code })), keep = S.sel;
+    setView('tower'); await RH.setLayout('tower'); await waitMorph();
+    press('KeyP'); await until(() => S.layoutTarget === 'spine'); await waitMorph(); frame(16, 2); assert.strictEqual(S.layout, 'spine', 'P from the tower: the skeleton');
+    const s1 = RH.spine(); assert.strictEqual(s1.name, 'spine');
+    panels.menu.dirty = true; frame(); const row = ['Skeleton', 'Dense', 'Full'].map((l) => panels.menu.buttons.find((b) => b.label === l)); assert(row.every(Boolean), 'the SPINE row has three buttons');
+    row[1].fn(); await waitMorph(); frame(16, 2); const s2 = RH.spine(); assert.strictEqual(S.layout, 'spine2'); assert.strictEqual(s2.name, 'spine2');
+    assert(s2.nodes > s1.nodes && s2.reached > s1.reached, 'dense is bigger: ' + s2.nodes + ' > ' + s1.nodes); assert(!s1.mesh.visible && s2.mesh.visible, 'only the shown level is drawn');
+    let flagged = 0; for (const v of RH.halo().pts.geometry.attributes.aSpine.array) flagged += v; assert.strictEqual(flagged, s2.reached, 'dots flagged for this level');
+    const t0 = Date.now(); press('KeyP'); await waitMorph(); frame(16, 2); const s3 = RH.spine(); console.log('     full level built + morphed in ' + (Date.now() - t0) + ' ms, ' + s3.nodes + ' nodes');
+    assert.strictEqual(S.layout, 'spine3'); assert.strictEqual(s3.kind, 'module'); assert.strictEqual(s3.reached, S.n, 'full: every module is on the tree');
+    assert(s3.mesh.material.uniforms.uGain.value < 0.5, 'the 175k branches are dimmer'); assert(s3.list[s3.steps].n && s3.list[s3.steps].n === S.names[s3.list[s3.steps].m].split('.').pop(), 'module branches carry the module name');
+    // a module branch is clickable: its module is selected and its whole sub-tree lit
+    const kn = s3.list.findIndex((x, k) => x.lv === 2), world = ents.world.object3D; S.focus = s3.list[kn].p[1]; frame(16, 2); world.updateMatrixWorld(true);
+    if (S.sel >= 0) panels.info.buttons.find((b) => b.label === 'Clear').fn();
+    ents.panels.object3D.position.set(0, 0, 50); ents.panels.object3D.updateMatrixWorld(true); const comps = ents.rc.components; delete ents.rc.components;
+    const js = []; s3.cnode.forEach((x, j) => { if (x === kn) js.push(j); }); const jm = js[js.length - 1];
+    const tgt = new THREE.Vector3(s3.cpos[3 * jm], s3.cpos[3 * jm + 1], s3.cpos[3 * jm + 2]).applyMatrix4(world.matrixWorld), o = new THREE.Vector3(0, 1.6, 0);
+    ents.rc.object3D.position.copy(o); ents.rc.object3D.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), tgt.clone().sub(o).normalize()); ents.rc.object3D.updateMatrixWorld(true);
+    ents.rc.listeners.triggerdown[0](); ents.rc.components = comps; ents.panels.object3D.position.set(0, 0, 0); ents.panels.object3D.updateMatrixWorld(true);
+    assert(S.sel >= 0 && s3.sel >= 0 && s3.list[s3.sel].m === S.sel, 'a module branch selects its module'); assert.strictEqual(S.pendingDecl, null, 'no declaration to jump to on a module branch');
+    press('KeyP'); await waitMorph(); frame(16, 2); assert.strictEqual(S.layout, 'spine', 'P comes back around to the skeleton'); assert.strictEqual(s3.sel, -1, 'leaving a level drops its highlight');
+    press('KeyL'); await waitMorph(); assert.strictEqual(S.layout, 'tower', 'L from the spine goes on to the tower'); frame(16, 2);
+    if (keep >= 0) RH.select(keep);
+  });
   await t('module sphere fades out when the selection is cleared (not a pop) and stays out of the packets view', () => {
     const c = RH.core(); frame(16, 40); assert(c.fade > 0.99, 'should be fully shown first');
     panels.info.buttons.find((b) => b.label === 'Clear').fn(); assert.strictEqual(S.decls.length, 0); assert.strictEqual(c.target, 0);

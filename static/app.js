@@ -39,19 +39,22 @@
     applyGlow(); if (panels.menu) panels.menu.dirty = true;
   }
   // ------------------------------------------------------------------ layouts: the tower (rings) or an N-fold helix; positions morph smoothly between them
-  const LAYOUTS = ['tower', 'helix2', 'helix4', 'helix8', 'spine'], LAYOUT_LABEL = { tower: 'tower', helix2: 'helix ×2', helix4: 'helix ×4', helix8: 'helix ×8', spine: 'spine' }, MORPH_SEC = 1.6;
+  const LAYOUTS = ['tower', 'helix2', 'helix4', 'helix8', 'spine', 'spine2', 'spine3'], CYCLE = ['tower', 'helix2', 'helix4', 'helix8', 'spine'], MORPH_SEC = 1.6;
+  const LAYOUT_LABEL = { tower: 'tower', helix2: 'helix ×2', helix4: 'helix ×4', helix8: 'helix ×8', spine: 'spine', spine2: 'spine (dense)', spine3: 'spine (full)' };
+  const SPINES = ['spine', 'spine2', 'spine3'], SPINE_LABEL = { spine: 'Skeleton', spine2: 'Dense', spine3: 'Full' }, isSpine = (x) => SPINES.includes(x);
   async function ensureLayout(name) {
     if (S.layouts[name]) return S.layouts[name];
     let a, sp;
     try {
-      [a, sp] = await Promise.all([bget('/data/pos_' + name + '.f32'), name === 'spine' && !spine ? Promise.all([jget('/data/spine.json'), bget('/data/spine.bin')]) : null]);
+      [a, sp] = await Promise.all([bget('/data/pos_' + name + '.f32'), isSpine(name) && !spines[name] ? Promise.all([jget('/data/' + name + '.json'), bget('/data/' + name + '.bin')]) : null]);
     } catch (e) {
-      if (name === 'spine') { S.spineMissing = true; throw new Error('no spine data – run build_spine.py (' + (e.message || e) + ')'); }   // L skips it from now on
+      if (name === 'spine') S.spineMissing = true;                                // L skips it from now on
+      if (isSpine(name)) throw new Error('no ' + name + ' data – run build_spine.py (' + (e.message || e) + ')');
       throw e;
     }
     a = new Float32Array(a);
     if (a.length !== S.n * 3) throw new Error('layout ' + name + ' has the wrong size');
-    if (sp) buildSpine(sp[0], new Uint8Array(sp[1]));
+    if (sp) buildSpine(sp[0], new Uint8Array(sp[1]), name);
     return (S.layouts[name] = a);
   }
   function recomputePacketCentroids() {
@@ -66,22 +69,28 @@
     S.layoutTarget = name; S.layoutLoading = true; S.layoutError = ''; if (panels.menu) panels.menu.dirty = true;
     try {
       const to = await ensureLayout(name);
+      if (isSpine(name)) setSpineFlags(spines[name].reachedArr);                  // which dots are on this level's tree, which are dust
       S.morph = { from: S.pos.slice(), to, t: 0, name };           // from the positions as drawn right now, so an interrupted morph does not jump
       hideLinks(); hoverMark.visible = false;
     } catch (e) { S.layoutError = String(e.message || e); S.layoutTarget = S.layout; }
     S.layoutLoading = false; if (panels.menu) panels.menu.dirty = true;
   }
   function cycleLayout() {
-    const list = LAYOUTS.filter((x) => !(x === 'spine' && S.spineMissing));       // the spine needs build_spine.py (and the Lean volume) once
-    setLayout(list[(list.indexOf(S.layoutTarget) + 1) % list.length]);
+    const list = CYCLE.filter((x) => !(x === 'spine' && S.spineMissing));        // the spine needs build_spine.py (and the Lean volume) once
+    const cur = isSpine(S.layoutTarget) ? 'spine' : S.layoutTarget;               // from any spine level L goes on to the tower
+    setLayout(list[(list.indexOf(cur) + 1) % list.length]);
   }
+  /** P (and the SPINE row in the menu): skeleton -> dense -> full -> skeleton; from another layout into the skeleton */
+  function cycleSpineLevel() { setLayout(isSpine(S.layoutTarget) ? SPINES[(SPINES.indexOf(S.layoutTarget) + 1) % SPINES.length] : 'spine'); }
 
   // ------------------------------------------------------------------ the spine layout: the proof as a lightning tree (build_spine.py)
   // trunk = a chain of declarations from riemannHypothesis down, each named in the proof of the previous one; branches = lemmas each step
   // names (sampled, up to 4 levels); dust = modules the tree never reaches (dimmed).  The modules themselves move like in any other layout
   // (a module sits on its first node); on top of them one additive ribbon mesh draws the tree, with a flash running down it now and then.
-  const SPINE = { halo: 3.0, minPx: 1.6, flashSec: 14, labelH: 0.025, labelEvery: 6, labelsLv1: 10 };   // labelH: one text line on screen (~1.5% of the view height, like the I labels), constant while zooming
-  let spine = null;
+  // gain: brightness of the branches per level (additive: 175k module branches at full strength would be a white wall); segs: samples per branch
+  const SPINE = { halo: 3.0, minPx: 1.6, flashSec: 14, labelH: 0.025, labelEvery: 6, labelsLv1: 10, gain: { spine: 1, spine2: 0.7, spine3: 0.16 }, segs: { spine: 10, spine2: 8, spine3: 2 } };   // labelH: one text line on screen (~1.5% of the view height, like the I labels), constant while zooming
+  const spines = {};                     // level name -> its tree, built on first use
+  let spine = null;                       // the level shown (most) right now: picking, highlighting and the info panel use it
   const SPINE_V = `
     attribute vec3 aTan; attribute float aSide, aT, aG, aW, aLv, aHot;
     uniform float uWorldScale, uMinPx, uHalo;
@@ -98,7 +107,7 @@
   // a wide violet haze, a pink body and a thin white-hot core (the trunk's core is the brightest), all additive: where branches cross
   // they add up to white, like the poster.  A flash runs down the whole tree every SPINE.flashSec seconds; the trunk flickers a little.
   const SPINE_F = `
-    uniform float uTime, uAlpha, uFlashSec, uHotOn;
+    uniform float uTime, uAlpha, uFlashSec, uHotOn, uGain;
     varying float vSide, vT, vG, vLv, vHot;
     void main(){
       float s2 = vSide*vSide, trunk = 1. - step(.5, vLv);
@@ -108,19 +117,22 @@
       float tip = trunk > .5 ? 1. : 1. - .5*vT;
       float ends = smoothstep(0., .04, vT) + trunk;                                // branches grow out of the trunk, no blob at the joint
       vec3 col = vec3(.50, .26, .92)*haze*.30 + vec3(1., .36, 1.)*body*(.45 + .25*trunk) + vec3(1., .92, 1.)*core*(.30 + .95*trunk);
-      col *= tip*flick*(1. + 1.6*flash)*min(ends, 1.);
+      col *= tip*flick*(1. + 1.6*flash)*min(ends, 1.)*mix(uGain, 1., trunk);
       if (uHotOn > .5) col *= vHot > .5 ? 1.9 : .16;                              // a selected branch (and what hangs from it) stands out
       gl_FragColor = vec4(col, uAlpha);
     }`;
-  function buildSpine(js, r) {
-    if (r.length !== S.n) throw new Error('spine.bin has the wrong size');
-    const b = L.buildSpine(js.nodes), g = new THREE.BufferGeometry();
+  function buildSpine(js, r, name) {
+    if (r.length !== S.n) throw new Error(name + '.bin has the wrong size');
+    if (!js.nodes) {                      // the full level: parallel arrays; its branches are modules, named after the module
+      js.nodes = js.m.map((m, k) => ({ n: js.n[k] != null ? js.n[k] : S.names[m].split('.').pop(), m, up: js.up[k], lv: js.lv[k], p: js.p.slice(3 * k, 3 * k + 3) }));
+    }
+    const b = L.buildSpine(js.nodes, { segs: SPINE.segs[name] || 10 }), g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(b.pos, 3)); g.setAttribute('aTan', new THREE.BufferAttribute(b.tan, 3));
     for (const [k, a] of [['aSide', b.side], ['aT', b.t], ['aG', b.g], ['aW', b.w], ['aLv', b.lv]]) g.setAttribute(k, new THREE.BufferAttribute(a, 1));
     g.setAttribute('aHot', new THREE.BufferAttribute(new Float32Array(b.vertexCount), 1).setUsage(THREE.DynamicDrawUsage));
     g.setIndex(new THREE.BufferAttribute(b.index, 1));
     const mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({ vertexShader: SPINE_V, fragmentShader: SPINE_F, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      uniforms: { uTime: { value: 0 }, uAlpha: { value: 0 }, uWorldScale: { value: 1 }, uMinPx: { value: SPINE.minPx }, uHalo: { value: SPINE.halo }, uFlashSec: { value: SPINE.flashSec }, uHotOn: { value: 0 } } }));
+      uniforms: { uTime: { value: 0 }, uAlpha: { value: 0 }, uWorldScale: { value: 1 }, uMinPx: { value: SPINE.minPx }, uHalo: { value: SPINE.halo }, uFlashSec: { value: SPINE.flashSec }, uHotOn: { value: 0 }, uGain: { value: SPINE.gain[name] != null ? SPINE.gain[name] : 1 } } }));
     mesh.frustumCulled = false; mesh.renderOrder = 2; mesh.visible = false; world.add(mesh);
     // labels: the root, every few trunk steps, and a few first-level branches; sprites (they face the viewer, in VR too)
     const labels = new THREE.Group(); labels.visible = false; world.add(labels);
@@ -143,45 +155,50 @@
       sp.position.set(nd.p[0] + 0.12, nd.p[1], nd.p[2]); sp.userData.node = k; labels.add(sp);
     }
     if (T) {
-      const top = js.nodes[0].p, leg = mkLabel('', '#b9a3d9', 0.8, [`trunk = ${T}-step proof spine from ${js.nodes[0].n}`, 'branches = sampled lemmas each step names', 'dust = modules never reached']);
+      const top = js.nodes[0].p, leg = mkLabel('', '#b9a3d9', 0.8, js.legend || [`trunk = ${T}-step proof spine from ${js.nodes[0].n}`, 'branches = sampled lemmas each step names', 'dust = modules never reached']);
       leg.position.set(top[0] + 0.12, top[1] + 1.2, top[2]); leg.userData.legend = true; labels.add(leg);
     }
-    const sa = pts.geometry.attributes.aSpine; for (let i = 0; i < r.length; i++) sa.array[i] = r[i]; sa.needsUpdate = true;
     // picking: the centre line of every curve (one of each vertex pair), each sample knowing its node, so a click anywhere on a branch counts
     const nC = b.vertexCount / 2, cpos = new Float32Array(nC * 3), cnode = new Int32Array(nC);
     for (let j = 0; j < nC; j++) { cpos.set(b.pos.subarray(6 * j, 6 * j + 3), 3 * j); cnode[j] = b.node[2 * j]; }
-    spine = { mesh, labels, steps: T, nodes: js.nodes.length, reached: r.reduce((a, x) => a + x, 0), root: js.root, list: js.nodes, cpos, cnode, vnode: b.node, step: b.step, sel: -1 };
-    return spine;
+    return (spines[name] = { name, kind: js.kind || 'decl', mesh, labels, steps: T, nodes: js.nodes.length, reached: r.reduce((a, x) => a + x, 0), reachedArr: r,
+      root: js.root, list: js.nodes, cpos, cnode, vnode: b.node, step: b.step, sel: -1 });
   }
-  /** how much of the spine is shown: 1 in the spine layout, 0 elsewhere, cross-fading with the morph; only in the tower view */
-  function spineAmount() {
-    const m = S.morph; let a = S.layout === 'spine' ? 1 : 0;
-    if (m) { const e = m.t * m.t * (3 - 2 * m.t); a = m.name === 'spine' ? Math.max(a * (1 - e), e) : a * (1 - e); }
+  function setSpineFlags(r) { const sa = pts.geometry.attributes.aSpine; for (let i = 0; i < r.length; i++) sa.array[i] = r[i]; sa.needsUpdate = true; }
+  /** how much of one spine level is shown: 1 in that layout, 0 elsewhere, cross-fading with the morph; only in the tower view */
+  function amountOf(name) {
+    const m = S.morph; let a = S.layout === name ? 1 : 0;
+    if (m) { const e = m.t * m.t * (3 - 2 * m.t); a = m.name === name ? Math.max(a * (1 - e), e) : a * (1 - e); }
     return S.view === 'tower' ? a : 0;
   }
+  /** how much of any spine is shown (the dots dim with it) */
+  function spineAmount() { return Math.min(1, SPINES.reduce((s, x) => s + (spines[x] ? amountOf(x) : 0), 0)); }
   /** highlight spine node k: a branch with everything hanging from it, or a trunk step with its own branches; -1 clears */
-  function spineSelect(k) {
-    if (!spine || (k === spine.sel && k >= 0)) return;
-    spine.sel = k == null ? -1 : k; const L0 = spine.list, hot = new Uint8Array(L0.length);
-    if (spine.sel >= 0) {
-      const root = spine.sel, trunkStep = L0[root].lv === 0;
-      for (let n = 0; n < L0.length; n++) {
-        if (trunkStep) { hot[n] = n === root || (L0[n].lv > 0 && spine.step[n] === root) ? 1 : 0; continue; }
-        let a = n; while (a >= 0 && a !== root && L0[a].lv > 0) a = L0[a].up; hot[n] = a === root ? 1 : 0;   // parents come first: a short walk up
-      }
+  function spineSelect(k, sp) {
+    sp = sp || spine; if (!sp || (k === sp.sel && k >= 0)) return;
+    sp.sel = k == null ? -1 : k; const L0 = sp.list, hot = new Uint8Array(L0.length);
+    if (sp.sel >= 0) {
+      const root = sp.sel, trunkStep = L0[root].lv === 0;
+      if (trunkStep) for (let n = 0; n < L0.length; n++) hot[n] = n === root || (L0[n].lv > 0 && sp.step[n] === root) ? 1 : 0;
+      else { hot[root] = 1; for (let n = root + 1; n < L0.length; n++) if (L0[n].lv > 0 && L0[n].up >= 0 && hot[L0[n].up]) hot[n] = 1; }   // parents come first: one pass
     }
-    const at = spine.mesh.geometry.attributes.aHot; for (let v = 0; v < at.count; v++) at.array[v] = hot[spine.vnode[v]]; at.needsUpdate = true;
-    spine.mesh.material.uniforms.uHotOn.value = spine.sel >= 0 ? 1 : 0; if (panels.info) panels.info.dirty = true;
+    const at = sp.mesh.geometry.attributes.aHot; for (let v = 0; v < at.count; v++) at.array[v] = hot[sp.vnode[v]]; at.needsUpdate = true;
+    sp.mesh.material.uniforms.uHotOn.value = sp.sel >= 0 ? 1 : 0; if (panels.info) panels.info.dirty = true;
   }
   function spineTick(t) {
-    const a = spineAmount();
-    ptsMat.uniforms.uSpine.value = spine ? a : 0;
-    for (const m of rulers) m.visible = !S.uiHidden && a < 0.5;                     // "depth 25" means nothing in the spine
-    if (!spine) return;
-    const u = spine.mesh.material.uniforms; u.uAlpha.value = a; u.uTime.value = t / 1000; u.uWorldScale.value = world.scale.x;
-    spine.mesh.visible = a > 0.002; spine.labels.visible = a > 0.002 && !S.uiHidden;
+    const total = spineAmount();
+    ptsMat.uniforms.uSpine.value = total;
+    for (const m of rulers) m.visible = !S.uiHidden && total < 0.5;                 // "depth 25" means nothing in the spine
     const k = SPINE.labelH * Math.tan((S.fov || 80) * Math.PI / 360) / Math.tan(40 * Math.PI / 180) / Math.max(world.scale.x, 1e-4);   // same rule as dbgScale
-    for (const sp of spine.labels.children) { sp.material.opacity = a * (sp.userData.legend ? 0.8 : 0.95); sp.scale.set(k * sp.userData.w, k * sp.userData.h, 1); }
+    let best = null, bestA = 0;
+    for (const name of SPINES) {
+      const sp = spines[name]; if (!sp) continue;
+      const a = amountOf(name); if (a > bestA) { best = sp; bestA = a; }
+      const u = sp.mesh.material.uniforms; u.uAlpha.value = a; u.uTime.value = t / 1000; u.uWorldScale.value = world.scale.x;
+      sp.mesh.visible = a > 0.002; sp.labels.visible = a > 0.002 && !S.uiHidden;
+      if (sp.labels.visible) for (const l of sp.labels.children) { l.material.opacity = a * (l.userData.legend ? 0.8 : 0.95); l.scale.set(k * l.userData.w, k * l.userData.h, 1); }
+    }
+    if (best && best !== spine) { if (spine && spine.sel >= 0) spineSelect(-1, spine); spine = best; }   // another level: its own highlight
   }
   function morphTick(dt) {
     const m = S.morph; if (!m) return;
@@ -468,6 +485,9 @@
     p.button(c, 320, y + 12, 260, 64, 'Packets', () => setView('packets'), S.view === 'packets');
     p.button(c, 600, y + 12, 260, 64, S.layoutLoading ? 'Layout: loading…' : S.layoutError ? 'Layout: failed' : 'Layout: ' + LAYOUT_LABEL[S.layoutTarget], cycleLayout, S.layoutTarget !== 'tower');
     y += 110;
+    text(c, 'SPINE (P)', 40, y, { size: 20, color: '#7283a6', weight: 700 });
+    SPINES.forEach((x, i) => p.button(c, 40 + i * 280, y + 12, 260, 64, SPINE_LABEL[x], () => setLayout(x), S.layoutTarget === x));
+    y += 110;
     text(c, 'COLOR', 40, y, { size: 20, color: '#7283a6', weight: 700 });
     ['State', 'Namespace', 'Depth'].forEach((l, i) => p.button(c, 40 + i * 280, y + 12, 260, 64, l, () => setColor(i), S.color === i));
     y += 110;
@@ -497,7 +517,7 @@
       if (S.glowAuto) text(c, 'Glow lowered automatically: the frame rate was too low', 40, y + (blocked ? 292 : 266), { size: 20, color: '#ffb454' });
     } else {
     text(c, 'Hide open: hide dots that are not built yet', 40, y + 266, { size: 20, color: '#7f8fb3' });
-    text(c, S.layoutTarget === 'spine' ? 'Closure (C) in the spine: off / dim the dots / only = the bare tree (+ the selection)' : 'Closure (C): off / dim the rest / only = hide everything but the selection + its imports', 40, y + 292, { size: 20, color: '#7f8fb3' });
+    text(c, isSpine(S.layoutTarget) ? 'Closure (C) in the spine: off / dim the dots / only = the bare tree (+ the selection)' : 'Closure (C): off / dim the rest / only = hide everything but the selection + its imports', 40, y + 292, { size: 20, color: '#7f8fb3' });
     text(c, 'Miniature: grip / pinch-drag moves it · stick ▲▼ = size', 40, y + 318, { size: 20, color: '#7f8fb3' });
     text(c, blocked ? `Sound is BLOCKED by the browser (audio ${snd.ctxState}): press any key / trigger / click once` : `Sound (N): bed follows CPU/RAM, a note per built module, a chord per packet · volume ${Math.round(snd.volume * 100)}%`, 40, y + 344, { size: 20, color: blocked ? '#ffb454' : '#7f8fb3' });
     text(c, S.glowAuto ? 'Glow lowered automatically: the frame rate was too low (G to raise)' : 'Glow (G): soft halo on built / active dots · "all" adds a faint one to open dots', 40, y + 370, { size: 20, color: S.glowAuto ? '#ffb454' : '#7f8fb3' });
@@ -637,7 +657,7 @@
       const ss = spine && spine.sel >= 0 && spine.list[spine.sel];
       if (ss && ss.m === i) {
         const nb = ss.lv ? 0 : spine.list.filter((x, n) => x.lv > 0 && spine.step[n] === spine.sel).length;
-        text(c, fitLeft(c, ss.lv ? `◆ branch ${ss.n} (level ${ss.lv}, from trunk step ${spine.step[spine.sel] + 1})` : `◆ trunk step ${spine.sel + 1}/${spine.steps}: ${ss.n} · ${nb} lemmas branch off here`, 820), 40, ly + 40, { size: 24, color: '#e0a8ff' });
+        text(c, fitLeft(c, ss.lv ? `◆ ${spine.kind === 'module' ? 'module branch' : 'branch'} ${ss.n} (level ${ss.lv}, from trunk step ${spine.step[spine.sel] + 1})` : `◆ trunk step ${spine.sel + 1}/${spine.steps}: ${ss.n} · ${nb} lemmas branch off here`, 820), 40, ly + 40, { size: 24, color: '#e0a8ff' });
       }
       p.button(c, 40, 340, 270, 64, '◀ an import', () => stepNeighbor(-1), false);
       p.button(c, 330, 340, 270, 64, 'a consumer ▶', () => stepNeighbor(1), false);
@@ -650,7 +670,7 @@
     }
     const dh = S.hoverSat >= 0 && S.decls[S.hoverSat];
     const sn = S.hoverSk >= 0 && spine && spine.list[S.hoverSk];
-    const h = dh ? `◆ ${dh.kind} ${dh.name || '(anonymous)'} · ${dh.lines} lines — click to jump` : sn ? `${sn.lv ? 'lemma' : 'spine step'} ${sn.n} · ${S.names[sn.m]}` : S.view === 'tower' ? (S.hover >= 0 ? S.names[S.hover] : '') : (S.hoverPk >= 0 ? 'P' + String(S.hoverPk + 1).padStart(4, '0') : '');
+    const h = dh ? `◆ ${dh.kind} ${dh.name || '(anonymous)'} · ${dh.lines} lines — click to jump` : sn ? `${sn.lv ? (spine.kind === 'module' ? 'module' : 'lemma') : 'spine step'} ${sn.n} · ${S.names[sn.m]}` : S.view === 'tower' ? (S.hover >= 0 ? S.names[S.hover] : '') : (S.hoverPk >= 0 ? 'P' + String(S.hoverPk + 1).padStart(4, '0') : '');
     c.font = `22px ${MONO}`; text(c, fitLeft(c, h ? '→ ' + h : '', 830), 40, 446, { size: 22, font: MONO, color: '#ffd133' });
   }
 
@@ -1321,7 +1341,7 @@
       p.mesh.position.set(R * Math.sin(t), y, -R * Math.cos(t)); p.mesh.rotation.set(rx || 0, -t, 0, 'YXZ');
       panelsEl.object3D.add(p.mesh); return p;
     };
-    mk('menu', 0.62, 0.962, 900, 1390, paintMenu, -38, 1.4);      // 1390 px: room for the Debug row and its legend
+    mk('menu', 0.62, 1.038, 900, 1500, paintMenu, -38, 1.4);      // 1500 px: room for the SPINE row, the Debug row and its legend
     mk('log', 1.5, 1.007, 1400, 940, paintLog, 0, 1.5);        // centre and the widest: it is the part that moves
     mk('source', 1.2, 0.883, 1400, 1030, paintSource, 45, 1.45);
     mk('info', 0.8, 0.41, 900, 460, paintInfo, 0, 0.72, -0.4, 1.6);
@@ -1646,7 +1666,7 @@
       hoverMark.visible = r.node >= 0 && S.uiMode < 2;
       if (r.sk >= 0) { const q = spine.list[r.sk].p; hoverMark.position.set(q[0], q[1], q[2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
       else if (r.node >= 0) { hoverMark.position.set(S.pos[3 * r.node], S.pos[3 * r.node + 1], S.pos[3 * r.node + 2]); S.lastNodeDist = tmpV.copy(hoverMark.position).applyMatrix4(world.matrixWorld).distanceTo(o); }
-      if (click && r.node >= 0) { stopFollow(); S.pendingDecl = r.sk >= 0 ? spine.list[r.sk].n : null; if (r.node !== S.sel) select(r.node); else gotoPendingDecl(); spineSelect(r.sk); }
+      if (click && r.node >= 0) { stopFollow(); S.pendingDecl = r.sk >= 0 && (spine.kind === 'decl' || spine.list[r.sk].lv === 0) ? spine.list[r.sk].n : null; if (r.node !== S.sel) select(r.node); else gotoPendingDecl(); spineSelect(r.sk); }
       else if (click && (S.sel >= 0 || S.selPk >= 0)) { stopFollow(); clearSel(); }          // a click into empty space deselects
       return r.node >= 0 ? 'node' : 'none';
     } else {
@@ -1834,7 +1854,8 @@
       if (e.code === 'Digit0' || e.code === 'Numpad0') setFov(80);
       if (e.code === 'KeyM' || e.code === 'KeyB') toggleMini();       // tower <-> miniature   (VR: B)
       if (e.code === 'KeyH' || e.code === 'KeyY') toggleUI();         // hide / show all UI    (VR: Y)
-      if (e.code === 'KeyL') cycleLayout();                           // tower -> helix x2 -> x4 -> x8
+      if (e.code === 'KeyL') cycleLayout();                           // tower -> helix x2 -> x4 -> x8 -> spine
+      if (e.code === 'KeyP') cycleSpineLevel();                       // spine: skeleton -> dense -> full
       if (e.code === 'KeyC') cycleClosure();                          // closure off / dim / only
       if (e.code === 'KeyK') cycleLinks();                            // connection style: fibres / tubes
       if (e.code === 'KeyG') cycleGlow();                             // glow off / on / all
@@ -1917,7 +1938,7 @@
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
     const el = $('loading'); if (el) el.remove();
-    window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, spine: () => spine, spineAmount, SPINE, pickInWorld, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, cycleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
+    window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, cycleSpineLevel, spine: () => spine, spines: () => spines, spineAmount, SPINE, pickInWorld, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, cycleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }
   boot();
 })();

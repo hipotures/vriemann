@@ -2,12 +2,15 @@
 """Precompute the "spine" layout: the proof as a lightning-shaped tree of declarations.
 
 Reads the Lean sources of a prepared volume (--vol, read only) and data/ from build_graph.py, writes
-data/pos_spine.f32 (a position for every module, like the other layouts) and data/spine.json (the tree the viewer draws).
+per level data/pos_<level>.f32 (a position for every module, like the other layouts) and data/<level>.json (the tree the viewer draws).
 
   trunk    = a chain of declarations from `riemannHypothesis` (Main), each one named in the proof of the previous one (the longest
              one a bounded search finds, at most SPINE_LEN; with the current sources ~60 steps down to import depth 1)
   branches = a sample of the declarations each trunk step names, expanded breadth-first up to three more levels
-  dust     = modules the tree never reaches, scattered faintly around it
+  dust     = modules the tree never reaches, scattered faintly around it (the same place on every level)
+
+Three levels share the trunk: spine (skeleton: a sample, 4 levels), spine2 (dense: up to 10 levels) and spine3 (full: every module,
+hung under its closest importer above, height = import depth along the trunk).  Each writes pos_<name>.f32, <name>.json and <name>.bin.
 
 The dependency graph is approximate: a declaration's body is the text up to the next declaration in the file, a reference is any
 identifier whose last component is the short name of a declaration (local names such as hypotheses and binders excluded), resolved to
@@ -183,76 +186,137 @@ def find_chain(root, L, budget):
 trunk = find_chain(root, SPINE_LEN, a.budget)
 print(f"trunk: {len(trunk)} steps through {len({d[0] for d in trunk})} modules")
 
-# ---------------------------------------------------------------- 3. geometry
+# ---------------------------------------------------------------- 3. geometry: the trunk (shared by every level)
 import random
 rnd = random.Random(a.seed)
-nodes = []                             # {n, m, p, up, lv}
-def add(d, p, up, lv):
-    nodes.append({"n": label(d), "m": d[0], "p": [round(v, 3) for v in p], "up": up, "lv": lv}); return len(nodes) - 1
-
 T = len(trunk)
 ph = [rnd.uniform(0, 6.28) for _ in range(6)]
+trunk_nodes = []                       # {n, m, p, up, lv}
 for i, d in enumerate(trunk):
     s = i / max(1, T - 1)
     y = TOP_Y + (BOT_Y - TOP_Y) * s
     x = 1.6 * math.sin(5.1 * s + ph[0]) + 0.6 * math.sin(13.0 * s + ph[1]) + rnd.gauss(0, 0.07)
     z = CENTER_Z + 1.6 * math.sin(4.3 * s + ph[2]) + 0.6 * math.sin(11.0 * s + ph[3]) + rnd.gauss(0, 0.07)
-    add(d, (x, y, z), i - 1 if i else -1, 0)
+    trunk_nodes.append({"n": label(d), "m": d[0], "p": [round(x, 3), round(y, 3), round(z, 3)], "up": i - 1 if i else -1, "lv": 0})
 
-def rand_dir(y_squash):
+def rand_dir(r, y_squash):
     while True:
-        v = [rnd.gauss(0, 1) for _ in range(3)]
+        v = [r.gauss(0, 1) for _ in range(3)]
         l = math.sqrt(sum(c * c for c in v))
         if l > 1e-6:
             return v[0] / l, v[1] / l * y_squash, v[2] / l
 
-placed = set(trunk)
-def grow(i):
-    """the branches of trunk step i, breadth first (every branch gets twigs before any gets more), at most PER_STEP nodes:
-    the first steps of the proof name far more lemmas than the last ones, uncapped the top would be one big bush"""
-    todo, count = [(trunk[i], i, 1, None)], 0
-    while todo and count < PER_STEP:
-        d, ni, lv, outward = todo.pop(0)
-        if lv > len(BR):
-            continue
-        cands = [c for c in deps(d) if c not in placed]
-        rnd.shuffle(cands)
-        for c in cands[:BR[lv - 1]]:
-            if count >= PER_STEP:
-                break
-            placed.add(c); count += 1
-            dx, dy, dz = rand_dir(0.55)
-            if outward is not None:    # deeper levels keep roughly the parent's direction, so the tree fans out instead of tangling
-                dx, dy, dz = dx * 0.6 + outward[0], dy * 0.6 + outward[1], dz * 0.6 + outward[2]
-                l = math.sqrt(dx * dx + dy * dy + dz * dz); dx, dy, dz = dx / l, dy / l, dz / l
-            L = rnd.uniform(*LEN[lv - 1]); p0 = nodes[ni]["p"]
-            p = (p0[0] + dx * L, min(TOP_Y + 1.0, p0[1] + dy * L), p0[2] + dz * L)
-            todo.append((c, add(c, p, ni, lv), lv + 1, (dx, dy, dz)))
+# levels 1 and 2: declarations.  The branches of each trunk step grow breadth first (every branch gets twigs before any gets
+# more), at most PER_STEP nodes per step: the first steps of the proof name far more lemmas than the last ones.
+DECL_LEVELS = {
+    "spine":  {"BR": BR, "LEN": LEN, "PER_STEP": PER_STEP},
+    "spine2": {"BR": [32, 16, 10, 8, 6, 5, 4, 4, 3, 3], "PER_STEP": 600,
+               "LEN": [(2.0, 5.0), (0.8, 2.2), (0.4, 1.1), (0.25, 0.7), (0.18, 0.5), (0.14, 0.4), (0.11, 0.32), (0.09, 0.26), (0.07, 0.2), (0.06, 0.16)]},
+}
+def decl_level(cfg, seed):
+    r = random.Random(seed)
+    nodes = [dict(x) for x in trunk_nodes]
+    placed = set(trunk)
+    BRl, LENl, PER = cfg["BR"], cfg["LEN"], cfg["PER_STEP"]
+    for i in range(T):
+        todo, count = [(trunk[i], i, 1, None)], 0
+        while todo and count < PER:
+            d, ni, lv, outward = todo.pop(0)
+            if lv > len(BRl):
+                continue
+            cands = [c for c in deps(d) if c not in placed]
+            r.shuffle(cands)
+            for c in cands[:BRl[lv - 1]]:
+                if count >= PER:
+                    break
+                placed.add(c); count += 1
+                dx, dy, dz = rand_dir(r, 0.55)
+                if outward is not None:    # deeper levels keep roughly the parent's direction, so the tree fans out instead of tangling
+                    dx, dy, dz = dx * 0.6 + outward[0], dy * 0.6 + outward[1], dz * 0.6 + outward[2]
+                    l = math.sqrt(dx * dx + dy * dy + dz * dz); dx, dy, dz = dx / l, dy / l, dz / l
+                L = r.uniform(*LENl[lv - 1]); p0 = nodes[ni]["p"]
+                p = (p0[0] + dx * L, min(TOP_Y + 1.0, p0[1] + dy * L), p0[2] + dz * L)
+                nodes.append({"n": label(c), "m": c[0], "p": [round(v, 3) for v in p], "up": ni, "lv": lv})
+                todo.append((c, len(nodes) - 1, lv + 1, (dx, dy, dz)))
+    return nodes
 
-for i in range(len(trunk)):
-    grow(i)
-print(f"tree: {len(nodes)} nodes ({sum(1 for x in nodes if x['lv'] == 1)} branches, {sum(1 for x in nodes if x['lv'] > 1)} twigs)")
+# level 3: every module.  Each one hangs under one of the modules that import it (the closest above in import depth: a short
+# step), so the tree spans the whole project; trunk modules sit on their trunk node.  Height follows import depth, mapped onto
+# the trunk (the trunk step at that depth), and each module wanders a little away from its parent, pulled back to the trunk.
+def module_level(seed):
+    r = random.Random(seed)
+    nodes = [dict(x) for x in trunk_nodes]
+    node_of = {}
+    for k, nd in enumerate(nodes):
+        node_of.setdefault(nd["m"], k)
+    con = [[] for _ in range(n)]
+    for k in range(0, len(edges), 2):
+        con[edges[k + 1]].append(edges[k])
+    by_d = defaultdict(list)                                   # import depth -> trunk heights at that depth
+    for nd in trunk_nodes:
+        by_d[depth[nd["m"]]].append(nd["p"])
+    known = sorted((d, sum(p[1] for p in ps) / len(ps)) for d, ps in by_d.items())
+    def y_of(d):
+        if d <= known[0][0]:
+            return known[0][1] - (known[0][0] - d) * 0.05
+        for (d0, y0), (d1, y1) in zip(known, known[1:]):
+            if d <= d1:
+                return y0 + (y1 - y0) * (d - d0) / (d1 - d0)
+        return known[-1][1]
+    tys = [nd["p"] for nd in trunk_nodes]
+    def trunk_xz(y):                                           # the trunk's x, z at height y
+        best = min(tys, key=lambda p: abs(p[1] - y)); return best[0], best[2]
+    # every node keeps an angle and a radius around the trunk: a child stays near its parent's angle (a branch stays a branch)
+    # but drifts, and its radius is pulled towards its own random target, so the whole tree is a round, hairy column
+    gen, polar = {}, {}
+    for k, nd in enumerate(nodes):
+        gen[k] = 0; polar[k] = (r.uniform(0, 2 * math.pi), 0.0)
+    for i in sorted(range(n), key=lambda i: -depth[i]):        # importers first: they are always deeper (higher)
+        if i in node_of or not con[i]:
+            continue
+        c = min(con[i], key=lambda c: (depth[c], c))           # the importer closest above
+        up = node_of[c]; a0, r0 = polar[up]
+        ang = a0 + r.gauss(0, 0.45)
+        rad = min(4.5, max(0.3, 0.6 * r0 + 0.4 * (0.4 + 3.8 * math.sqrt(h01(i, 4))) + r.gauss(0, 0.2)))
+        y = y_of(depth[i]) + r.uniform(-0.08, 0.08)
+        tx, tz = trunk_xz(y)
+        k = len(nodes); gen[k] = g = gen[up] + 1; polar[k] = (ang, rad)
+        nodes.append({"n": None, "m": i, "p": [round(tx + rad * math.cos(ang), 2), round(y, 2), round(tz + rad * math.sin(ang), 2)], "up": up, "lv": min(g, 4)})
+        node_of[i] = k
+    return nodes
 
 # ---------------------------------------------------------------- 4. module positions: a module sits on its first (highest) node, the rest is dust
-pos = array("f", [0.0]) * (3 * n)
-reached = bytearray(n)
-for nd in nodes:
-    m = nd["m"]
-    if not reached[m]:
-        reached[m] = 1
-        pos[3 * m:3 * m + 3] = array("f", nd["p"])
 def h01(i, k):
     x = (i * 0x9E3779B1 + k * 0x85EBCA6B + 0x165667B1) & 0xFFFFFFFF
     x ^= x >> 16; x = (x * 0x7FEB352D) & 0xFFFFFFFF; x ^= x >> 15; x = (x * 0x846CA68B) & 0xFFFFFFFF; x ^= x >> 16
     return x / 4294967296.0
-for i in range(n):
-    if reached[i]:
-        continue
-    r = DUST_R * math.sqrt(0.08 + 0.92 * h01(i, 1)); th = 2 * math.pi * h01(i, 2)
-    pos[3 * i] = r * math.cos(th); pos[3 * i + 1] = depth[i] * meta["yStep"] + (h01(i, 3) - 0.5) * 0.4; pos[3 * i + 2] = CENTER_Z + r * math.sin(th)
 
-(DATA / "pos_spine.f32").write_bytes(pos.tobytes())
-(DATA / "spine.bin").write_bytes(bytes(reached))
-(DATA / "spine.json").write_text(json.dumps({"root": a.root, "steps": T, "levels": len(BR), "nodes": nodes}, separators=(",", ":")))
-print(f"reached {sum(reached)} of {n} modules; wrote pos_spine.f32, spine.bin, spine.json ({(DATA / 'spine.json').stat().st_size / 1e6:.2f} MB) in {time.time() - t0:.0f} s")
+def write_level(name, nodes, kind, legend):
+    pos = array("f", [0.0]) * (3 * n)
+    reached = bytearray(n)
+    for nd in nodes:
+        m = nd["m"]
+        if not reached[m]:
+            reached[m] = 1
+            pos[3 * m:3 * m + 3] = array("f", nd["p"])
+    for i in range(n):                 # the dust: the same place on every level
+        if reached[i]:
+            continue
+        r = DUST_R * math.sqrt(0.08 + 0.92 * h01(i, 1)); th = 2 * math.pi * h01(i, 2)
+        pos[3 * i] = r * math.cos(th); pos[3 * i + 1] = depth[i] * meta["yStep"] + (h01(i, 3) - 0.5) * 0.4; pos[3 * i + 2] = CENTER_Z + r * math.sin(th)
+    (DATA / f"pos_{name}.f32").write_bytes(pos.tobytes())
+    (DATA / f"{name}.bin").write_bytes(bytes(reached))
+    doc = {"root": a.root, "steps": T, "kind": kind, "legend": legend}
+    if kind == "decl":
+        doc["nodes"] = nodes
+    else:                              # 175k nodes: parallel arrays instead of objects (a third of the size)
+        doc.update(n=[x["n"] for x in nodes], m=[x["m"] for x in nodes], up=[x["up"] for x in nodes], lv=[x["lv"] for x in nodes],
+                   p=[c for x in nodes for c in x["p"]])
+    (DATA / f"{name}.json").write_text(json.dumps(doc, separators=(",", ":")))
+    print(f"{name}: {len(nodes)} nodes, {sum(reached)} of {n} modules reached; {(DATA / f'{name}.json').stat().st_size / 1e6:.2f} MB  ({time.time() - t0:.0f} s)")
+
+trunk_line = f"trunk = {T}-step proof spine from {a.root}"
+for k, (name, cfg) in enumerate(DECL_LEVELS.items()):
+    write_level(name, decl_level(cfg, a.seed + k), "decl", [trunk_line, "branches = sampled lemmas each step names" + (" (dense)" if k else ""), "dust = modules never reached"])
+write_level("spine3", module_level(a.seed + 7), "module", [trunk_line, "branches = every module, under one of its importers", "(height = import depth along the trunk)"])
 print("trunk:", " → ".join(f"{label(d)}[{depth[d[0]]}]" for d in trunk))

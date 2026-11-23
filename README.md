@@ -91,7 +91,12 @@ It is drawn as one additive ribbon mesh (violet haze, pink body, white-hot core;
 with everything hanging from it (the rest dims), selects the module its declaration lives in and scrolls the source to that declaration; a click
 on the trunk lights that step with the lemmas branching off it. The info panel names the branch; Clear, another module or a click into empty space drops it. The dust is not clickable in the spine (it is everywhere).
 **Closure** (C) works in the spine too: off = all dots, dim = the dots fade out of the way, only = **the bare tree** without any dots (with a selection: the tree plus the selection's closure). The modules move onto their first node like in any other layout.
-It needs `python3 build_spine.py` once (reads the Lean sources of the volume, `--vol`; ~40 s), which writes `data/pos_spine.f32`, `spine.json` and `spine.bin`;
+**Three levels** (the **SPINE** row in the menu, or **P**), all with the same trunk; the dots that are not on a level's tree stay where they are (the dust):
+**Skeleton** (~700 declarations in ~370 modules: a sample of the lemmas each step names, 4 levels deep), **Dense** (~4,200 declarations in ~1,900
+modules: up to 10 levels, all the project-internal lemmas the sources name; the rest of the names point into Mathlib) and **Full** (every one of the
+175,187 modules, each hung under the module importing it that is closest above in import depth, its height = import depth along the trunk; the
+branches are modules, dimmer, so 175k of them do not add up to a white wall). L from any level goes on to the tower.
+It needs `python3 build_spine.py` once (reads the Lean sources of the volume, `--vol`; ~1 min), which writes `data/pos_spine*.f32`, `spine*.json` and `spine*.bin` for the three levels;
 without them L skips the spine. The dependency graph is approximate (a declaration's text up to the next one, identifiers resolved by short name
 to the same module, a direct import, or a transitively imported module). Tune the look with `SPINE` in `app.js`, the shape with the constants at the top of `build_spine.py`.
 
