@@ -94,8 +94,8 @@ on the trunk lights that step with the lemmas branching off it. The info panel n
 **Three levels** (the **SPINE** row in the menu, or **P**), all with the same trunk; the dots that are not on a level's tree stay where they are (the dust):
 **Skeleton** (~700 declarations in ~370 modules: a sample of the lemmas each step names, 4 levels deep), **Dense** (~4,200 declarations in ~1,900
 modules: up to 10 levels, all the project-internal lemmas the sources name; the rest of the names point into Mathlib) and **Full** (every one of the
-175,187 modules, each hung under the module importing it that is closest above in import depth, its height = import depth along the trunk; the
-branches are modules, dimmer, so 175k of them do not add up to a white wall). L from any level goes on to the tower.
+175,187 modules, each hung under the module importing it that is closest above in import depth, its height = import depth along the trunk; ribbons
+are drawn only for the trunk and three levels of branches, ~240; the other modules are dots on their spots, clickable). L from any level goes on to the tower.
 **Wind** (the button next to the levels, or **V**): the tree hangs from `riemannHypothesis` like a willow, every node a joint that carries
 its parent's sway and adds a little of its own, so the tips move most (well under a metre); the module dots and labels ride along. It eases
 in slowly and calms while you point at or have selected something, so picking hits what you see. Remembered between sessions.

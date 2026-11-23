@@ -88,16 +88,16 @@
   // names (sampled, up to 4 levels); dust = modules the tree never reaches (dimmed).  The modules themselves move like in any other layout
   // (a module sits on its first node); on top of them one additive ribbon mesh draws the tree, with a flash running down it now and then.
   // gain: brightness of the branches per level (additive: 175k module branches at full strength would be a white wall); segs: samples per branch
-  const SPINE = { halo: 3.0, minPx: 1.6, flashSec: 14, labelH: 0.025, labelEvery: 6, labelsLv1: 10, gain: { spine: 1, spine2: 0.7, spine3: 1 }, dimCell: 0.5, dimK: 4, segs: { spine: 10, spine2: 8, spine3: 2 } };   // labelH: one text line on screen (~1.5% of the view height, like the I labels), constant while zooming
+  const SPINE = { halo: 3.0, minPx: 1.6, flashSec: 14, labelH: 0.025, labelEvery: 6, labelsLv1: 10, gain: { spine: 1, spine2: 0.7, spine3: 1 }, ribbonLv: 3, segs: { spine: 10, spine2: 8, spine3: 10 } };   // labelH: one text line on screen (~1.5% of the view height, like the I labels), constant while zooming
   // the spine wind: one displacement per moving node in a float texture (uWindW x uWindH texels), looked up by slot
   const WIND_AT = `vec3 windAt(float i){ vec2 uv = vec2(mod(i, uWindW) + .5, floor(i/uWindW) + .5)/vec2(uWindW, uWindH); return texture2D(uWindTex, uv).xyz; }`;
   const spines = {};                     // level name -> its tree, built on first use
   let spine = null;                       // the level shown (most) right now: picking, highlighting and the info panel use it
   const SPINE_V = `
-    attribute vec3 aTan; attribute float aSide, aT, aG, aW, aLv, aHot, aN0, aN1, aF, aDim;
+    attribute vec3 aTan; attribute float aSide, aT, aG, aW, aLv, aHot, aN0, aN1, aF;
     uniform float uWorldScale, uMinPx, uHalo;
     uniform sampler2D uWindTex; uniform float uWindW, uWindH, uWind;
-    varying float vSide, vT, vG, vLv, vHot, vDim;
+    varying float vSide, vT, vG, vLv, vHot;
     ${WIND_AT}
     void main(){
       vec3 pp = position; if (uWind > 0.) pp += uWind*mix(windAt(aN0), windAt(aN1), aF);   // the two joints it lies between drag it along
@@ -106,14 +106,14 @@
       vec3 sv = cross(tv, normalize(mv.xyz)); float sl = length(sv); sv = sl > 1e-4 ? sv/sl : vec3(1., 0., 0.);   // across, facing the eye
       float w = max(aW*uHalo*uWorldScale, uMinPx*max(-mv.z, .05)/(projectionMatrix[1][1]*500.));
       mv.xyz += sv*aSide*w;
-      vSide = aSide; vT = aT; vG = aG; vLv = aLv; vHot = aHot; vDim = aDim;
+      vSide = aSide; vT = aT; vG = aG; vLv = aLv; vHot = aHot;
       gl_Position = projectionMatrix*mv;
     }`;
   // a wide violet haze, a pink body and a thin white-hot core (the trunk's core is the brightest), all additive: where branches cross
   // they add up to white, like the poster.  A flash runs down the whole tree every SPINE.flashSec seconds; the trunk flickers a little.
   const SPINE_F = `
     uniform float uTime, uAlpha, uFlashSec, uHotOn, uGain;
-    varying float vSide, vT, vG, vLv, vHot, vDim;
+    varying float vSide, vT, vG, vLv, vHot;
     void main(){
       float s2 = vSide*vSide, trunk = 1. - step(.5, vLv);
       float core = exp(-s2*45.), body = exp(-s2*9.), haze = exp(-s2*2.2);
@@ -122,7 +122,7 @@
       float tip = trunk > .5 ? 1. : 1. - .5*vT;
       float ends = smoothstep(0., .04, vT) + trunk;                                // branches grow out of the trunk, no blob at the joint
       vec3 col = vec3(.50, .26, .92)*haze*.30 + vec3(1., .36, 1.)*body*(.45 + .25*trunk) + vec3(1., .92, 1.)*core*(.30 + .95*trunk);
-      col *= tip*flick*(1. + 1.6*flash)*min(ends, 1.)*mix(uGain*vDim, 1., trunk);
+      col *= tip*flick*(1. + 1.6*flash)*min(ends, 1.)*mix(uGain, 1., trunk);
       if (uHotOn > .5) col *= vHot > .5 ? 1.9 : .16;                              // a selected branch (and what hangs from it) stands out
       gl_FragColor = vec4(col, uAlpha);
     }`;
@@ -131,7 +131,16 @@
     if (!js.nodes) {                      // the full level: parallel arrays; its branches are modules, named after the module
       js.nodes = js.m.map((m, k) => ({ n: js.n[k] != null ? js.n[k] : S.names[m].split('.').pop(), m, up: js.up[k], lv: js.lv[k], p: js.p.slice(3 * k, 3 * k + 3) }));
     }
-    const b = L.buildSpine(js.nodes, { segs: SPINE.segs[name] || 10 }), g = new THREE.BufferGeometry();
+    // the full level draws ribbons only for the trunk and three levels of branches (~240); its other 175k modules stay dots on their spots
+    // (175k additive ribbons were a white sun and killed the browser).  ids: ribbon node -> node in js.nodes
+    const ids = []; js.nodes.forEach((nd, k) => { if (js.kind !== 'module' || nd.lv <= SPINE.ribbonLv) ids.push(k); });
+    const inv = new Int32Array(js.nodes.length).fill(-1); ids.forEach((k, j) => { inv[k] = j; });
+    const sub = ids.length === js.nodes.length ? js.nodes : ids.map((k) => Object.assign({}, js.nodes[k], { up: js.nodes[k].up < 0 ? -1 : inv[js.nodes[k].up] }));
+    const b = L.buildSpine(sub, { segs: SPINE.segs[name] || 10 }), g = new THREE.BufferGeometry();
+    if (sub !== js.nodes) {
+      for (const a of [b.node, b.n0, b.n1]) for (let v = 0; v < a.length; v++) a[v] = a[v] < 0 ? -1 : ids[a[v]];
+      b.step = new Int32Array(js.nodes.length); js.nodes.forEach((nd, k) => { b.step[k] = nd.lv === 0 ? k : b.step[nd.up]; });
+    }
     g.setAttribute('position', new THREE.BufferAttribute(b.pos, 3)); g.setAttribute('aTan', new THREE.BufferAttribute(b.tan, 3));
     for (const [k, a] of [['aSide', b.side], ['aT', b.t], ['aG', b.g], ['aW', b.w], ['aLv', b.lv]]) g.setAttribute(k, new THREE.BufferAttribute(a, 1));
     g.setAttribute('aHot', new THREE.BufferAttribute(new Float32Array(b.vertexCount), 1).setUsage(THREE.DynamicDrawUsage));
@@ -141,16 +150,9 @@
     const a0 = new Float32Array(b.vertexCount), a1 = new Float32Array(b.vertexCount);
     for (let v = 0; v < b.vertexCount; v++) { a0[v] = plan.tex[b.n0[v]]; a1[v] = plan.tex[b.n1[v]]; }
     g.setAttribute('aN0', new THREE.BufferAttribute(a0, 1)); g.setAttribute('aN1', new THREE.BufferAttribute(a1, 1)); g.setAttribute('aF', new THREE.BufferAttribute(b.f, 1));
-    // density: on the full level a branch shines the less the more branches end in its 0.5 m cell, so the packed core of 175k additive
-    // ribbons stays about as bright as the dense level instead of a white wall, while the sparse outskirts keep full strength
-    const dim = new Float32Array(js.nodes.length).fill(1);
-    if (js.kind === 'module') {
-      const c = SPINE.dimCell, key = (q) => Math.floor(q[0] / c) + ',' + Math.floor(q[1] / c) + ',' + Math.floor(q[2] / c), cnt = new Map();
-      for (const nd of js.nodes) { const k = key(nd.p); cnt.set(k, (cnt.get(k) || 0) + 1); }
-      js.nodes.forEach((nd, k) => { if (nd.lv > 1) dim[k] = Math.min(1, SPINE.dimK / cnt.get(key(nd.p))); });
-    }
-    const ad = new Float32Array(b.vertexCount); for (let v = 0; v < b.vertexCount; v++) ad[v] = dim[b.node[v]];
-    g.setAttribute('aDim', new THREE.BufferAttribute(ad, 1));
+    // the modules without a ribbon (full level) are picked as dots, at their still spots
+    const dn = []; js.nodes.forEach((nd, k) => { if (inv[k] < 0) dn.push(k); });
+    const dnode = Int32Array.from(dn), dpos = new Float32Array(dn.length * 3); dn.forEach((k, j) => dpos.set(js.nodes[k].p, 3 * j));
     const dotNode = new Float32Array(S.n).fill(-1); for (let k = js.nodes.length - 1; k >= 0; k--) dotNode[js.nodes[k].m] = plan.tex[k];   // first node wins
     g.setIndex(new THREE.BufferAttribute(b.index, 1));
     const mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({ vertexShader: SPINE_V, fragmentShader: SPINE_F, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
@@ -185,7 +187,7 @@
     const nC = b.vertexCount / 2, cpos = new Float32Array(nC * 3), cnode = new Int32Array(nC);
     for (let j = 0; j < nC; j++) { cpos.set(b.pos.subarray(6 * j, 6 * j + 3), 3 * j); cnode[j] = b.node[2 * j]; }
     return (spines[name] = { name, kind: js.kind || 'decl', mesh, labels, steps: T, nodes: js.nodes.length, reached: r.reduce((a, x) => a + x, 0), reachedArr: r,
-      root: js.root, list: js.nodes, cpos, cnode, vnode: b.node, step: b.step, sel: -1, plan, wd, wtex, WW, WH, dotNode });
+      root: js.root, list: js.nodes, cpos, cnode, vnode: b.node, step: b.step, sel: -1, plan, wd, wtex, WW, WH, dotNode, dpos, dnode });
   }
   function setSpineFlags(sp) {
     const ga = pts.geometry.attributes, sa = ga.aSpine; for (let i = 0; i < S.n; i++) sa.array[i] = sp.reachedArr[i]; sa.needsUpdate = true;
@@ -1682,6 +1684,8 @@
     const lo = o.clone().applyMatrix4(tmpM), ld = d.clone().transformDirection(tmpM);
     if (S.view === 'tower' && spine && spineAmount() > 0.5) {             // spine: the tree's nodes (declarations) first, then the dust
       const j = L.pickPoint(spine.cpos, spine.cnode.length, lo, ld, null, false, 0.02);
+      const d = j < 0 && spine.dnode.length ? L.pickPoint(spine.dpos, spine.dnode.length, lo, ld, null, false, 0.006) : -1;   // a module dot of the full level
+      if (d >= 0) return { node: spine.list[spine.dnode[d]].m, pk: -1, sk: spine.dnode[d] };
       return j >= 0 ? { node: spine.list[spine.cnode[j]].m, pk: -1, sk: spine.cnode[j] } : { node: -1, pk: -1, sk: -1 };   // the dust is not clickable: it is everywhere, a click into empty space must stay empty
     }
     if (S.view === 'tower') return { node: L.pickPoint(S.pos, S.n, lo, ld, S.st, S.hideOpen, 0.02), pk: -1, sk: -1 };
