@@ -1,10 +1,14 @@
-/* VRiemann – 3D / VR viewer of the RH proof replay.  A-Frame shell + one THREE.Points cloud + canvas panels. */
+/* VRiemann – 3D / VR viewer of Lean proofs (the RH replay, and others added with add_proof.py).  A-Frame shell + one THREE.Points cloud + canvas panels. */
 (function () {
   'use strict';
   const showErr = (m) => { const el = document.getElementById('loading'); if (el) { el.style.color = '#ff8a8a'; el.textContent = 'error: ' + m; } };
   window.addEventListener('error', (e) => showErr(e.message));
   window.addEventListener('unhandledrejection', (e) => showErr(String(e.reason && e.reason.message || e.reason)));
   const L = window.RHLib;
+  // which proof: none = the RH replay (live builds), ?proof=<key> = one added with add_proof.py.  Every /data/ and /api/ request names it.
+  const PROOF = new URLSearchParams(location.search).get('proof') || '';
+  const U = (u) => PROOF ? u + (u.includes('?') ? '&' : '?') + 'proof=' + encodeURIComponent(PROOF) : u;
+  const switchProof = (key) => { if (key !== PROOF) location.search = key ? '?proof=' + encodeURIComponent(key) : ''; };
   const THREE = AFRAME.THREE;
 
   // ------------------------------------------------------------------ state
@@ -16,7 +20,7 @@
     sel: -1, selPk: -1, hover: -1, hoverPk: -1, hoverSk: -1, pendingDecl: null, hoverBtn: null, ancestors: 0, impCur: 0, conCur: 0,
     live: new Map(), dirtyState: false, lastUpload: 0, focus: 10, focusTarget: null,
     ax: { lx: 0, ly: 0, rx: 0, ry: 0 }, keys: { up: false, down: false },
-    status: null, logLines: [], packetLines: [], pkStats: null,
+    status: null, proofs: [], logLines: [], packetLines: [], pkStats: null,
     src: { name: '', tok: null, scroll: 0, loading: false, error: '', red: null, bytes: 0, lines: 0 },
   };
   // ------------------------------------------------------------------ sound (procedural, off until the user switches it on)
@@ -285,8 +289,8 @@
   const $ = (id) => document.getElementById(id);
 
   // ------------------------------------------------------------------ data loading
-  const jget = (u) => fetch(u).then((r) => { if (!r.ok) throw new Error(u + ' ' + r.status); return r.json(); });
-  const bget = (u) => fetch(u).then((r) => { if (!r.ok) throw new Error(u + ' ' + r.status); return r.arrayBuffer(); });
+  const jget = (u) => fetch(U(u)).then((r) => { if (!r.ok) throw new Error(u + ' ' + r.status); return r.json(); });
+  const bget = (u) => fetch(U(u)).then((r) => { if (!r.ok) throw new Error(u + ' ' + r.status); return r.arrayBuffer(); });
 
   async function loadAll() {
     const set = (t) => { const el = $('loading'); if (el) el.textContent = t; };
@@ -295,7 +299,7 @@
       const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 90000);
       set(`loading data ${done}/${TOTAL} … ${u}`);
       try {
-        const r = await fetch(u, { signal: ctl.signal });
+        const r = await fetch(U(u), { signal: ctl.signal });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const body = kind === 'json' ? await r.json() : kind === 'text' ? await r.text() : await r.arrayBuffer();
         done++; set(`loading data ${done}/${TOTAL} …`);
@@ -309,6 +313,7 @@
       get('/data/edges.u32'), get('/data/packet_centroid.f32'), get('/data/names.txt.gz', 'text'), get('/api/state'),
     ]);
     S.meta = meta; S.n = meta.modules;
+    document.title = (meta.title || 'Alpöge RH replay') + ' – VRiemann';
     S.pos = new Float32Array(pos); S.depth = new Uint8Array(depth); S.ns = new Uint8Array(ns); S.pk = new Uint16Array(pk);
     S.pkPos = new Float32Array(pc);
     set('indexing…');
@@ -518,11 +523,17 @@
   const abbrev = (c, name, w) => { const k = name.split('.'); for (let i = 0; i < k.length - 2 && c.measureText(k.join('.')).width > w; i++) k[i] = k[i][0]; return fitLeft(c, k.join('.'), w); };
   const fit = (c, s, w) => { if (c.measureText(s).width <= w) return s; while (s.length > 4 && c.measureText(s + '…').width > w) s = s.slice(0, -1); return s + '…'; };
 
+  /** a packet's name: P0001… in the replay, the folder in a proof from add_proof.py */
+  const pkName = (k) => (S.meta.packetNames && S.meta.packetNames[k]) || 'P' + String(k + 1).padStart(4, '0');
+  const pkWord = () => S.meta.packetWord || 'packet';
+  const cap = (w) => w[0].toUpperCase() + w.slice(1);
+
   // ---- menu panel
   function paintMenu(c, p) {
     const st = S.status, cnt = st ? st.counts : { open: 0, assigned: 0, done: 0, ours: 0 };
-    text(c, 'Alpöge RH replay', 40, 68, { size: 46, weight: 700, color: '#fff' });
-    text(c, `${L.fmt(S.n)} modules · ${L.fmt(S.meta.edges)} imports · ${S.meta.packets} packets`, 40, 108, { size: 24, color: '#93a4c3' });
+    const still = !!(st && st.static);                                   // a proof without a live build (add_proof.py)
+    c.font = `700 46px ${SANS}`; text(c, fit(c, S.meta.title || 'Alpöge RH replay', 820), 40, 68, { size: 46, weight: 700, color: '#fff' });
+    text(c, `${L.fmt(S.n)} modules · ${L.fmt(S.meta.edges)} imports · ${S.meta.packets} ${pkWord()}s`, 40, 108, { size: 24, color: '#93a4c3' });
     // progress bar
     const bx = 40, by = 134, bw = 820, bh = 34, tot = S.n || 1;
     c.fillStyle = '#1b2233'; roundRect(c, bx, by, bw, bh, 10); c.fill();
@@ -530,15 +541,20 @@
     for (const [v, col] of [[cnt.done, '#40d973'], [cnt.ours, '#ffd133'], [cnt.assigned, '#598cff']]) {
       const w = bw * v / tot; c.fillStyle = col; c.fillRect(x, by, Math.max(w, v ? 2 : 0), bh); x += w;
     }
-    text(c, `built ${L.fmt(cnt.done + cnt.ours)} (${L.pct(cnt.done + cnt.ours, tot)}) · by us ${L.fmt(cnt.ours)}`, 40, 206, { size: 26, color: '#e8eefc' });
+    text(c, still ? `machine-checked ${L.fmt(cnt.done)} (${L.pct(cnt.done, tot)})` : `built ${L.fmt(cnt.done + cnt.ours)} (${L.pct(cnt.done + cnt.ours, tot)}) · by us ${L.fmt(cnt.ours)}`, 40, 206, { size: 26, color: '#e8eefc' });
     const ph = phaseOf(st);
     c.fillStyle = PHASE_COLOR[ph.kind] || '#6b7280'; c.beginPath(); c.arc(52, 240, 10, 0, 7); c.fill();
     c.font = `22px ${MONO}`; text(c, fit(c, ph.text, 790), 74, 248, { size: 22, font: MONO, color: ph.kind === 'stopped' ? '#ff8a8a' : '#aab6d3' });
 
     let y = 290;
+    text(c, 'PROOF (reloads the page)', 40, y, { size: 20, color: '#7283a6', weight: 700 });
+    const pr = S.proofs.length ? S.proofs : [{ key: PROOF, label: S.meta.label || 'RH replay' }], pw = (820 - 20 * (pr.length - 1)) / pr.length;
+    c.font = `26px ${SANS}`;
+    pr.forEach((x, i) => p.button(c, 40 + i * (pw + 20), y + 12, pw, 64, fit(c, x.label, pw - 24), () => switchProof(x.key), x.key === PROOF));
+    y += 110;
     text(c, 'VIEW', 40, y, { size: 20, color: '#7283a6', weight: 700 });
     p.button(c, 40, y + 12, 260, 64, 'Modules', () => setView('tower'), S.view === 'tower');
-    p.button(c, 320, y + 12, 260, 64, 'Packets', () => setView('packets'), S.view === 'packets');
+    p.button(c, 320, y + 12, 260, 64, cap(pkWord()) + 's', () => setView('packets'), S.view === 'packets');
     p.button(c, 600, y + 12, 260, 64, S.layoutLoading ? 'Layout: loading…' : S.layoutError ? 'Layout: failed' : 'Layout: ' + LAYOUT_LABEL[S.layoutTarget], cycleLayout, S.layoutTarget !== 'tower');
     y += 110;
     text(c, 'SPINE (P · wind V)', 40, y, { size: 20, color: '#7283a6', weight: 700 });
@@ -594,11 +610,12 @@
         text(c, fit(c, n, 780), 76, y + 38 + i * 34, { size: 22, color: '#cbd5e1' });
       });
     } else if (S.color === 2) {
-      text(c, 'DEPTH: blue/violet … orange (0 → 202), a module imports only shallower ones', 40, y, { size: 22, color: '#93a4c3' });
+      text(c, `DEPTH: blue/violet … orange (0 → ${S.meta.maxDepth}), a module imports only shallower ones`, 40, y, { size: 22, color: '#93a4c3' });
     } else {
       text(c, 'LEGEND', 40, y, { size: 20, color: '#7283a6', weight: 700 });
-      [['open', NODE_COLORS.open, cnt.open], ['assigned to a volunteer', NODE_COLORS.assigned, cnt.assigned],
-       ['built (others)', NODE_COLORS.done, cnt.done], ['built by us', NODE_COLORS.ours, cnt.ours], ['building now (pulses)', NODE_COLORS.live, null]]
+      (still ? [['not checked', NODE_COLORS.open, cnt.open], ['machine-checked', NODE_COLORS.done, cnt.done]]
+        : [['open', NODE_COLORS.open, cnt.open], ['assigned to a volunteer', NODE_COLORS.assigned, cnt.assigned],
+           ['built (others)', NODE_COLORS.done, cnt.done], ['built by us', NODE_COLORS.ours, cnt.ours], ['building now (pulses)', NODE_COLORS.live, null]])
         .forEach(([l, col, v], i) => {
           c.fillStyle = col; c.beginPath(); c.arc(54, y + 30 + i * 34, 9, 0, 7); c.fill();
           text(c, l + (v != null ? '   ' + L.fmt(v) : ''), 76, y + 38 + i * 34, { size: 22 });
@@ -693,7 +710,7 @@
     let y = 54;
     if (S.view === 'packets' && S.selPk >= 0 || (S.selPk >= 0 && S.sel < 0)) {
       const k = S.selPk, ps = S.pkStats;
-      text(c, 'Packet P' + String(k + 1).padStart(4, '0'), 40, y, { size: 38, weight: 700, color: '#fff' });
+      c.font = `700 38px ${SANS}`; text(c, fit(c, cap(pkWord()) + ' ' + pkName(k), 820), 40, y, { size: 38, weight: 700, color: '#fff' });
       if (ps) {
         text(c, `${ps.tot[k]} modules: open ${ps.open[k]} · assigned ${ps.assigned[k]} · built ${ps.done[k]} · by us ${ps.ours[k]}`, 40, y + 48, { size: 26 });
         text(c, 'highlighted white in the tower', 40, y + 84, { size: 22, color: '#93a4c3' });
@@ -707,7 +724,7 @@
       for (const part of parts) { const t = line ? line + '.' + part : part; if (c.measureText(t).width > 820 && line) { text(c, line + '.', 40, ly, { size: 30, weight: 700, color: '#fff' }); line = part; ly += 38; } else line = t; }
       text(c, line, 40, ly, { size: 30, weight: 700, color: '#fff' });
       ly += 52;
-      text(c, `${S.ids[i]} · depth ${S.depth[i]} · packet P${String(S.pk[i] + 1).padStart(4, '0')} · ${['open', 'assigned', 'built (others)', 'built by us'][s] || '?'}`, 40, ly, { size: 24, color: '#aab6d3' });
+      text(c, `${S.ids[i]} · depth ${S.depth[i]} · ${pkWord()} ${pkName(S.pk[i])} · ${(S.status && S.status.static ? ['not checked', 'assigned', 'machine-checked', 'built by us'] : ['open', 'assigned', 'built (others)', 'built by us'])[s] || '?'}`, 40, ly, { size: 24, color: '#aab6d3' });
       ly += 42;
       const ni = S.csr.impStart[i + 1] - S.csr.impStart[i], nc = S.csr.conStart[i + 1] - S.csr.conStart[i];
       text(c, `imports ${ni} · imported by ${nc} · whole ancestry ${L.fmt(S.ancestors)} modules`, 40, ly, { size: 24 });
@@ -727,7 +744,7 @@
     }
     const dh = S.hoverSat >= 0 && S.decls[S.hoverSat];
     const sn = S.hoverSk >= 0 && spine && spine.list[S.hoverSk];
-    const h = dh ? `◆ ${dh.kind} ${dh.name || '(anonymous)'} · ${dh.lines} lines — click to jump` : sn ? `${sn.lv ? (spine.kind === 'module' ? 'module' : 'lemma') : 'spine step'} ${sn.n} · ${S.names[sn.m]}` : S.view === 'tower' ? (S.hover >= 0 ? S.names[S.hover] : '') : (S.hoverPk >= 0 ? 'P' + String(S.hoverPk + 1).padStart(4, '0') : '');
+    const h = dh ? `◆ ${dh.kind} ${dh.name || '(anonymous)'} · ${dh.lines} lines — click to jump` : sn ? `${sn.lv ? (spine.kind === 'module' ? 'module' : 'lemma') : 'spine step'} ${sn.n} · ${S.names[sn.m]}` : S.view === 'tower' ? (S.hover >= 0 ? S.names[S.hover] : '') : (S.hoverPk >= 0 ? pkName(S.hoverPk) : '');
     c.font = `22px ${MONO}`; text(c, fitLeft(c, h ? '→ ' + h : '', 830), 40, 446, { size: 22, font: MONO, color: '#ffd133' });
   }
 
@@ -785,7 +802,7 @@
   async function loadSource(i) {
     const s = S.src; s.name = S.names[i]; s.loading = true; s.error = ''; s.tok = null; s.rows = null; s.scroll = 0; s.hl = null; S.decls = []; if (core && core.target === 1) { core.decls = S.decls; coreSetDecls(core); core.heart.material.uniforms.uHasCode.value = 0; } panels.source.dirty = true;
     try {
-      const r = await fetch('/api/src?i=' + i);
+      const r = await fetch(U('/api/src?i=' + i));
       if (S.sel !== i) return;
       if (!r.ok) throw new Error(r.status === 404 ? 'source file not found in the volume' : 'HTTP ' + r.status);
       const txt = await r.text();
@@ -1400,7 +1417,7 @@
       p.mesh.position.set(R * Math.sin(t), y, -R * Math.cos(t)); p.mesh.rotation.set(rx || 0, -t, 0, 'YXZ');
       panelsEl.object3D.add(p.mesh); return p;
     };
-    mk('menu', 0.62, 1.038, 900, 1500, paintMenu, -38, 1.4);      // 1500 px: room for the SPINE row, the Debug row and its legend
+    mk('menu', 0.62, 1.114, 900, 1610, paintMenu, -38, 1.4);      // 1610 px: room for the PROOF and SPINE rows, the Debug row and its legend
     mk('log', 1.5, 1.007, 1400, 940, paintLog, 0, 1.5);        // centre and the widest: it is the part that moves
     mk('source', 1.2, 0.883, 1400, 1030, paintSource, 45, 1.45);
     mk('info', 0.8, 0.41, 900, 460, paintInfo, 0, 0.72, -0.4, 1.6);
@@ -1537,7 +1554,7 @@
     S.builtNow.add(i);                                       // built in this session (the state poll catches up within 8 s)
   }
   function connectEvents() {
-    const es = new EventSource('/api/events');
+    const es = new EventSource(U('/api/events'));
     es.onmessage = (m) => {
       const ev = JSON.parse(m.data);
       if (ev.k === 'built') {
@@ -1999,6 +2016,7 @@
     const scene = document.querySelector('a-scene');
     if (!scene.hasLoaded) await new Promise((r) => scene.addEventListener('loaded', r, { once: true }));
     buildScene(); wireInput(scene); applyWorldTransform(); recenter(); connectEvents(); pollState();
+    fetch('/api/proofs').then((r) => r.ok ? r.json() : []).then((v) => { S.proofs = v; if (panels.menu) panels.menu.dirty = true; }).catch(() => {});   // the PROOF row
     const el = $('loading'); if (el) el.remove();
     window.RH = { get link() { return link; }, links: () => links, FOV_MIN, FOV_MAX, FADE_SEC, OUT_SEC, LINK_SEC, toggleDebug, debugLabels, DEBUG_KINDS, dbgGroup: () => dbgGroup, solids: () => solids, solidList: () => solidList, SOLID,ribbons: () => ribbons, fibers: () => fibers, FIB, cycleLinks, RIB, hoverMark: () => hoverMark, clearHover, setLayout, cycleLayout, cycleSpineLevel, toggleWind, WIND, spine: () => spine, spines: () => spines, spineAmount, SPINE, pickInWorld, layoutState: () => ({ layout: S.layout, target: S.layoutTarget, morph: S.morph }), beacon: () => beacon, mainIdx: () => mainIdx, codeLines, paintCode, unlockSound, cycleClosure, halo: () => ({ ptsHalo, pkHalo, pts, ptsMat }), cycleGlow, cores: () => cores, sound: () => sound, soundLoad, soundPacketLines, soundModule, setFov, faceModule, toggleFollow, coreTelemetry, core: () => core, coreSatPick, jumpToDecl, coreTick, S, startGrab, endGrab, scaleMini, bringToMe, updateRulers, rulers, toggleUI, cycleUI, select, jumpTo, followStep, stopFollow, setView, setColor, toggleMini, recenter, panels };   // handy from the console
   }

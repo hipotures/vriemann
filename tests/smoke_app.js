@@ -21,12 +21,14 @@ const sceneRoot = new THREE.Scene();
 const scene = { hasLoaded: true, canvas: sceneCanvas, camera, object3D: sceneRoot, is: (s) => (s === 'vr-mode' ? vrMode : false), renderer: { xr: { get isPresenting() { return vrMode && !fsFallback; } } }, addEventListener() {} };
 let tickFn = null;
 const winL = {}, docL = {};
+global.location = { search: process.env.PROOF ? '?proof=' + process.env.PROOF : '' };   // PROOF=grh: smoke-test a proof from add_proof.py
 global.window = global; global.addEventListener = (n, f) => { (winL[n] = winL[n] || []).push(f); };
 global.AFRAME = { THREE, registerComponent: (n, def) => { if (n === 'rh-tick') tickFn = def.tick; } };
 global.document = { getElementById: (id) => ents[id], querySelector: (s) => (s === 'a-scene' ? scene : s === '.a-enter-vr' ? vrButton : null), createElement: () => mkCanvas(), documentElement: { addEventListener(n, f) { (docL[n] = docL[n] || []).push(f); } } };
 const realFetch = fetch;
 // /api/status is pinned: the live server reports whatever Lean happens to be compiling, which would make the tests racy
 const STATUS = { modules: 175187, counts: { open: 1, assigned: 1, done: 1, ours: 1 }, receipts: [], compiling: [], running: false, packetLog: [] };
+if (process.env.PROOF) STATUS.static = true;   // what the server says for a proof without a live build
 global.fetch = (u, o) => String(u).includes('/api/status') ? Promise.resolve({ ok: true, json: () => Promise.resolve(STATUS) }) : realFetch(u.startsWith('http') ? u : BASE + u, o);
 global.EventSource = class { constructor(u) { this.u = u; global.__es = this; } };
 const errors = []; process.on('unhandledRejection', (e) => errors.push(e));
@@ -44,6 +46,27 @@ load('lib.js'); load('audio.js'); load('app.js');
   const until = async (cond, ms = 10000) => { const t0 = Date.now(); while (!cond() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 25)); return cond(); };
   const frame = (ms = 16, n = 1) => { for (let i = 0; i < n; i++) tickFn.call({}, performance.now(), ms); };
 
+  if (process.env.PROOF) {               // another proof (add_proof.py): its own data, menu texts and spine; the rest is the replay's suite
+    await t('proof boots with its own data; menu names it and offers the switch', async () => {
+      assert.strictEqual(S.n, S.meta.modules); assert(S.n < 175187); assert.strictEqual(Object.keys(panels).length, 4);
+      await until(() => S.proofs.length > 1); panels.menu.dirty = true; drawn.length = 0; frame();
+      assert(drawn.some((x) => x === S.meta.title), 'title from meta.json'); assert(!drawn.some((x) => x.includes('Alpöge')), 'no replay title');
+      assert(drawn.some((x) => x.startsWith('machine-checked')), 'checked count instead of built-by-us');
+      const mine = panels.menu.buttons.find((b) => b.label === S.meta.label), rh = panels.menu.buttons.find((b) => b.label === 'RH replay');
+      assert(mine && mine.active !== false && rh, 'PROOF row: ' + panels.menu.buttons.map((b) => b.label).join(','));
+      assert(panels.menu.buttons.some((b) => b.label === 'Folders'), 'groups are folders');
+      rh.fn(); assert.strictEqual(location.search, '', 'switching to the replay drops ?proof');
+    });
+    await t('proof: Main selects, its source comes from the proof', async () => {
+      select(S.nameIdx.get('Main')); await until(() => S.src.tok || S.src.error);
+      assert(S.src.tok && S.src.lines > 3, 'source: ' + S.src.error);
+      panels.info.dirty = true; drawn.length = 0; frame(); assert(drawn.some((x) => x.includes('folder ')), 'info names the folder');
+    });
+    await t('proof: all three spine levels load and morph', async () => {
+      for (const l of ['spine', 'spine2', 'spine3']) { await RH.setLayout(l); assert(!S.layoutError, l + ': ' + S.layoutError); frame(16, 120); assert.strictEqual(S.layoutTarget, l); }
+    });
+    console.log(ok + ' proof smoke tests passed'); process.exit(errors.length ? 1 : 0);
+  }
   await t('boots: data + panels loaded', () => { assert.strictEqual(S.n, 175187); assert.strictEqual(Object.keys(panels).length, 4); frame(); });
   await t('select a real module: closure, markers, source load', async () => {
     const i = S.nameIdx.get('GroundTheory.GlobalFields.Artin.LogCharpoly'); assert(i >= 0);

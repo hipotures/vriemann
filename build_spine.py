@@ -26,6 +26,7 @@ ap.add_argument("--vol", default=str(Path.home() / "rh-replay-vol"))
 ap.add_argument("--data", default=str(Path(__file__).resolve().parent / "data"))
 ap.add_argument("--root", default="riemannHypothesis", help="declaration at the top of the trunk")
 ap.add_argument("--seed", type=int, default=7)
+ap.add_argument("--max-defs", type=int, default=0, help="ignore short names declared more often than this (pow, one, symm: Mathlib projections, not lemmas); 0 = off")
 ap.add_argument("--budget", type=int, default=20000, help="trunk search: declarations to try (more = slower, maybe longer)")
 a = ap.parse_args()
 SRC, DATA = Path(a.vol) / "lean/src", Path(a.data)
@@ -54,7 +55,10 @@ DECL = re.compile(r"^(?:@\[[^\]\n]*\]\s*)?(?:(?:private|protected|noncomputable|
                   r"(?:theorem|lemma|def|abbrev|instance|structure|class|inductive|opaque|axiom)\b[ \t]*([^\s:({\[⦃]*)", re.M)
 ID = re.compile(r"[^\W\d][\w'!?]*(?:\.[^\W\d][\w'!?]*)*")
 # names bound inside a declaration (hypotheses, binders, have/obtain/intro...) shadow global ones: `hn`, `hy`, `this` are not lemmas
-BOUND = re.compile(r"(?:\b(?:have|let|set|intro|intros|fun|obtain|rcases|rintro|cases|induction|generalizing|with|at|using)\b|[(\[{⦃⟨,|])\s*([^\W\d][\w'!?]*)")
+# after a bracket or comma only a name that the pattern / binder closes counts (`⟨x, hx⟩`, `(n : ℕ)`): `⟨a, foo P⟩` applies the lemma foo,
+# and `[a, b]` is a lemma list (rw, simp, grind), never binders
+BOUND = re.compile(r"\b(?:have|let|set|intro|intros|fun|obtain|rcases|rintro|cases|induction|generalizing|with|at|using)\b\s*([^\W\d][\w'!?]*)"
+                   r"|[({⦃⟨,|]\s*([^\W\d][\w'!?]*)(?=\s*[,⟩)}⦄|:])")
 KEYWORDS = set("""by exact apply refine intro intros simp simpa rw rwa have show from fun let in at with using calc conv
  obtain rcases rintro cases induction constructor use exists left right linarith nlinarith positivity ring field_simp norm_num
  omega decide trivial rfl this sorry if then else match do return assumption contradiction exfalso push_cast gcongr congr ext
@@ -88,7 +92,7 @@ def bodies(m):
 
 def resolve(short, m):
     c = where.get(short)
-    if not c:
+    if not c or (a.max_defs and len(c) > a.max_defs):
         return None
     same = [x for x in c if x[0] == m]
     if same:
@@ -133,7 +137,7 @@ def deps(d):
         if hdr:
             body = body[hdr.end():]
         out, seen = [], {d}
-        local = set(BOUND.findall(body)) | KEYWORDS
+        local = {x for pair in BOUND.findall(body) for x in pair if x} | KEYWORDS
         for idt in ID.findall(body):
             short = idt.rsplit(".", 1)[-1]
             if short in local or idt in local or len(short) < 3:

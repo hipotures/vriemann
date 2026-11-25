@@ -15,6 +15,9 @@ from pathlib import Path
 ap = argparse.ArgumentParser()
 ap.add_argument("--repo", default=str(Path.home() / "DEV/alpoge-rh-replay"))
 ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "data"))
+ap.add_argument("--title", default="Alpöge RH replay", help="shown at the top of the menu")
+ap.add_argument("--label", default="RH replay", help="short name on the menu's proof button")
+ap.add_argument("--packet-word", default="packet", help="what a group of modules is called in the viewer (add_proof.py: folder)")
 a = ap.parse_args()
 repo, out = Path(a.repo), Path(a.out)
 out.mkdir(parents=True, exist_ok=True)
@@ -37,7 +40,7 @@ by_depth = {}
 for i, r in enumerate(rows):
     by_depth.setdefault(r["depth"], []).append(i)
 max_depth = max(by_depth)
-Y_STEP, R0, R_BAND = 0.1, 5.0, 4.0
+Y_STEP, R0, R_BAND = round(20.2 / max(1, max_depth), 6), 5.0, 4.0   # every proof stands ~20 m tall (the replay: 202 levels, 0.1 each)
 pos = array("f", [0.0]) * (3 * n)
 for d, members in by_depth.items():
     members.sort(key=lambda i: rows[i]["module"])
@@ -115,6 +118,12 @@ for p in range(n_packets):
     c = max(cnt[p], 1)
     pc.extend((sx[p] / c, sy[p] / c, sz[p] / c))
 
+# names of the packets, when the index has them (add_proof.py: folders); the replay's are just P0001…
+try:
+    packet_names = json.loads((repo / "packets.json").read_text(encoding="utf-8"))
+except (OSError, ValueError):
+    packet_names = None
+
 def wr(name, data):
     (out / name).write_bytes(bytes(data) if not isinstance(data, (bytes, bytearray)) else data)
 
@@ -129,7 +138,7 @@ wr("packet_centroid.f32", pc.tobytes())
 with gzip.open(out / "names.txt.gz", "wb", compresslevel=9) as f:
     f.write("\n".join(r["id"] + "\t" + r["module"] for r in rows).encode("utf-8"))
 (out / "meta.json").write_text(json.dumps({
-    "modules": n, "edges": len(edges) // 2, "packets": n_packets, "maxDepth": max_depth,
+    "title": a.title, "label": a.label, "packetWord": a.packet_word, "packetNames": packet_names, "modules": n, "edges": len(edges) // 2, "packets": n_packets, "maxDepth": max_depth,
     "yStep": Y_STEP, "namespaces": ns_list, "helix": HELIX, "layouts": ["tower", "helix2", "helix4", "helix8"],
 }))
 print(f"modules={n} edges={len(edges)//2} packets={n_packets} maxDepth={max_depth} namespaces={len(ns_list)}")

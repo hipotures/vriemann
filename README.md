@@ -50,6 +50,20 @@ A-Frame 1.7.0 (three.js r173) is vendored in `vendor/`, so no CDN is used. The s
 The source panel uses **Iosevka Fixed** (narrow monospace, SIL OFL 1.1, `vendor/fonts/`), subset to the characters that occur in the Lean sources (23 kB woff2);
 a few script capitals such as 𝓞 fall back to the system font. Each character gets its own grid cell, so a fallback glyph never shifts the rest of the row.
 
+## Other proofs: GRH
+The **PROOF** row at the top of the menu switches between the RH replay and any other Lean proof added with `add_proof.py`, for example
+the [GRH proof](https://github.com/hipotures/grh-lean) in its two editions (readable: 803 modules, compact: 794):
+
+    git clone https://github.com/hipotures/grh-lean ~/DEV/grh-lean
+    python3 add_proof.py grh ~/DEV/grh-lean/grh --title "GRH in Lean 4 (readable)" --label GRH
+    python3 add_proof.py grh-compact ~/DEV/grh-lean/grh-compact --title "GRH in Lean 4 (compact)" --label "GRH compact"
+
+Each takes a few seconds and writes `proofs/<key>/` (index, a link to the sources, layouts and spine; not in git); restart `server.py` and it finds
+them. Switching reloads the page with `?proof=<key>` (in the headset: enter VR again). Height is the project-internal import depth (Mathlib does not
+count), stretched so every proof stands about as tall as the replay; the **packets** are the project's folders; every module is green
+(machine-checked), there is no live build, receipts or loop status for these proofs. The spine starts at `riemannHypothesis` in `Main` like the
+replay's; with GRH it runs `grh → … → star_inequality → integral_forms_long → …` down to the foundations (54 steps readable, 39 compact).
+
 ## Controls
 Desktop: drag = look around, WASD = move, Q/E = elevator (depth), click = select / press a button (click into empty space = deselect), wheel over the code = scroll (in the miniature: size),
 **B or M** = tower ⇄ miniature, **X** = follow live (off → camera → in place), **H or Y** = hide/show the UI, **R** = panels in front of me (A is "left", so recenter is R). **K** = connection style (fibres / tubes), **I** = debug letters, **+ / −** or Shift+wheel = zoom (0 = reset).
@@ -98,7 +112,7 @@ with everything hanging from it (the rest dims), selects the module its declarat
 on the trunk lights that step with the lemmas branching off it. The info panel names the branch; Clear, another module or a click into empty space drops it. The dust is not clickable in the spine (it is everywhere).
 **Closure** (C) works in the spine too: off = all dots, dim = the dots fade out of the way, only = **the bare tree** without any dots (with a selection: the tree plus the selection's closure). The modules move onto their first node like in any other layout.
 **Three levels** (the **SPINE** row in the menu, or **P**), all with the same trunk; the dots that are not on a level's tree stay where they are (the dust):
-**Skeleton** (~700 declarations in ~370 modules: a sample of the lemmas each step names, 4 levels deep), **Dense** (~4,200 declarations in ~1,900
+**Skeleton** (~1,000 declarations in ~380 modules: a sample of the lemmas each step names, 4 levels deep), **Dense** (~5,800 declarations in ~2,000
 modules: up to 10 levels, all the project-internal lemmas the sources name; the rest of the names point into Mathlib) and **Full** (every one of the
 175,187 modules, each hung under the module importing it that is closest above in import depth, its height = import depth along the trunk; ribbons
 are drawn only for the trunk and three levels of branches, ~240; the other modules are dots on their spots, clickable). L from any level goes on to the tower.
@@ -178,4 +192,5 @@ Add new ones with (needs Pillow; panoramas are stacked automatically, other shot
     python3 tests/test_phase.py                              # build-loop phase detection
     node tests/test_audio.js                                 # sound engine with a fake AudioContext
     NODE_PATH=<…/node_modules with three@0.173.0> node tests/smoke_app.js [http://127.0.0.1:8080]   # app.js without a browser, against a running server
+    PROOF=grh NODE_PATH=<…> node tests/smoke_app.js [http://127.0.0.1:8080]           # the same for a proof from add_proof.py (its own short suite)
 Not tested: GLSL rendering and real controllers (they need a browser / headset).

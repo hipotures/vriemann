@@ -51,6 +51,54 @@ with gzip.open(REPO / "tracker/modules.jsonl.gz", "rt", encoding="utf-8") as f:
         elif r["state"] != "open":
             snap[k] = 2
 
+# ---------------------------------------------------------------- the proofs: the replay above (live builds) + proofs/<key>/ from add_proof.py
+def read_meta(d):
+    try:
+        return json.loads((d / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+MAIN_META = read_meta(ROOT / "data")
+
+
+class Proof:
+    """another proof (add_proof.py): its own data/, index and sources; static (machine-checked), so no live build, receipts or log"""
+    def __init__(self, key, base):
+        self.key, self.data, self.src = key, base / "data", (base / "lean/src").resolve()
+        self.meta = read_meta(self.data)
+        self.ids, self.names = [], []
+        with gzip.open(self.data / "names.txt.gz", "rt", encoding="utf-8") as f:
+            for line in f:
+                i, m = line.rstrip("\n").split("\t")
+                self.ids.append(i); self.names.append(m)
+        self.name_idx = {v: k for k, v in enumerate(self.names)}
+        id_idx = {v: k for k, v in enumerate(self.ids)}
+        snap = bytearray(len(self.names))
+        with gzip.open(base / "tracker/modules.jsonl.gz", "rt", encoding="utf-8") as f:
+            for line in f:
+                r = json.loads(line)
+                snap[id_idx[r["id"]]] = 1 if r["state"] == "assigned" else 0 if r["state"] == "open" else 2
+        self.snap = bytes(snap)
+        c = collections.Counter(snap)
+        self.counts = {"open": c[0], "assigned": c[1], "done": c[2], "ours": 0}
+
+    def status(self):
+        return {"modules": len(self.names), "counts": self.counts, "receipts": [], "compiling": [], "sys": sysinfo(0),
+                "running": False, "buildAge": None, "phase": {"kind": "idle", "text": "machine-checked · no live build for this proof"},
+                "activeRun": None, "packetLog": [], "static": True}
+
+
+PROOFS = {}
+for _m in sorted((ROOT / "proofs").glob("*/data/meta.json")):
+    try:
+        PROOFS[_m.parent.parent.name] = Proof(_m.parent.parent.name, _m.parent.parent)
+    except (OSError, ValueError, KeyError) as e:
+        print(f"rh-vr: skipping proof {_m.parent.parent.name}: {e}", flush=True)
+
+
+def proof_list():
+    out = [{"key": "", "label": MAIN_META.get("label", "RH replay"), "title": MAIN_META.get("title", "Alpöge RH replay"), "modules": N}]
+    return out + [{"key": k, "label": p.meta.get("label", k), "title": p.meta.get("title", k), "modules": len(p.names)} for k, p in PROOFS.items()]
+
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 BUILT = re.compile(r"^\S?\s*\[(\d+)/(\d+)\]\s+Built\s+(\S+?)(?::\S+)?\s+\(([\d.]+)(ms|s)\)")
 
@@ -412,10 +460,10 @@ GZ_CACHE = {}
 STATIC = {"/": ROOT / "static/index.html"}
 
 
-def resolve_static(path):
+def resolve_static(path, data=ROOT / "data"):
     if path in STATIC:
         return STATIC[path]
-    for prefix, base in (("/static/", ROOT / "static"), ("/vendor/", ROOT / "vendor"), ("/data/", ROOT / "data")):
+    for prefix, base in (("/static/", ROOT / "static"), ("/vendor/", ROOT / "vendor"), ("/data/", data)):
         if path.startswith(prefix):
             p = (base / path[len(prefix):]).resolve()
             if p.is_file() and base.resolve() in p.parents:
@@ -443,37 +491,43 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
+        key = q.get("proof", [""])[0]
+        prf = PROOFS.get(key)                     # None = the replay (the default, with live builds)
         try:
+            if key and prf is None:
+                return self.send_bytes(404, b"unknown proof", "text/plain")
+            if u.path == "/api/proofs":
+                return self.send_bytes(200, json.dumps(proof_list()).encode(), "application/json")
             if u.path == "/api/state":
-                return self.send_bytes(200, state_vector()["buf"], "application/octet-stream")
+                return self.send_bytes(200, prf.snap if prf else state_vector()["buf"], "application/octet-stream")
             if u.path == "/api/status":
-                return self.send_bytes(200, json.dumps(status()).encode(), "application/json")
+                return self.send_bytes(200, json.dumps(prf.status() if prf else status()).encode(), "application/json")
             if u.path == "/api/find":
-                k = name_idx.get(q.get("name", [""])[0])
+                k = (prf.name_idx if prf else name_idx).get(q.get("name", [""])[0])
                 if k is None:
                     return self.send_bytes(404, b"unknown module", "text/plain")
                 return self.send_bytes(200, json.dumps({"i": k}).encode(), "application/json")
             if u.path == "/api/src":
-                return self.api_src(q)
+                return self.api_src(q, prf.names if prf else names, prf.src if prf else SRC_ROOT)
             if u.path == "/api/events":
-                return self.api_events()
-            p = resolve_static(u.path)
+                return self.api_events(live=prf is None)
+            p = resolve_static(u.path, prf.data if prf else ROOT / "data")
             if p is None:
                 return self.send_bytes(404, b"not found", "text/plain")
             return self.static(p)
         except (BrokenPipeError, ConnectionResetError):
             pass
 
-    def api_src(self, q):
+    def api_src(self, q, names, src_root):
         try:
             k = int(q.get("i", [""])[0])
-            if not 0 <= k < N:
+            if not 0 <= k < len(names):
                 raise IndexError(k)          # no negative (wrap-around) indices
             name = names[k]
         except (ValueError, IndexError):
             return self.send_bytes(400, b"bad index", "text/plain")
-        p = (SRC_ROOT / (name.replace(".", "/") + ".lean")).resolve()
-        if SRC_ROOT not in p.parents or not p.is_file():
+        p = (src_root / (name.replace(".", "/") + ".lean")).resolve()
+        if src_root not in p.parents or not p.is_file():
             return self.send_bytes(404, b"source not found", "text/plain")
         data = p.read_bytes()
         note = b""
@@ -482,11 +536,13 @@ class H(BaseHTTPRequestHandler):
         return self.send_bytes(200, data + note, "text/plain; charset=utf-8",
                                {"X-Module": quote(name), "X-Source-Size": str(p.stat().st_size)})
 
-    def api_events(self):
+    def api_events(self, live=True):
+        """server-sent events of the live build; another proof gets only keepalives (it has no live build)"""
         qu = queue.Queue(maxsize=1000)
         with lock:
-            backlog = list(ring)[-60:]
-            subs.add(qu)
+            backlog = list(ring)[-60:] if live else []
+            if live:
+                subs.add(qu)
         try:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -580,6 +636,8 @@ def main():
         srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
         scheme = "https"
     print(f"rh-vr: {N} modules, {len(ours)} built by us locally -> {scheme}://{args.host}:{args.port}/", flush=True)
+    for k, pr in PROOFS.items():
+        print(f"rh-vr: proof {pr.meta.get('label', k)}: {len(pr.names)} modules -> {scheme}://{args.host}:{args.port}/?proof={k}", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
